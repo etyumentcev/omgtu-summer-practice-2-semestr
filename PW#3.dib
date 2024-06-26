@@ -45,8 +45,36 @@ class DefiniteIntegral
     //
     public static double Solve(double a, double b, Func<double, double> function, double step, int threadsnumber)
     {
-        // отсюда надо начинать реализацию задачи
-        return 0.0;
+        double result = 0.0;
+        object lockObj = new object();
+        Barrier barrier = new Barrier(threadsnumber + 1);
+        double interval = (b - a) / threadsnumber;
+        Thread[] threads = new Thread[threadsnumber];
+
+        for (int i = 0; i < threadsnumber; i++)
+        {
+            double localA = a + i * interval;
+            double localB = localA + interval;
+            threads[i] = new Thread(() =>
+            {
+                double localResult = 0.0;
+                int steps = (int)Math.Ceiling((localB - localA) / step);
+                for (int j = 0; j < steps; j++)
+                {
+                    double x1 = localA + j * step;
+                    double x2 = Math.Min(x1 + step, localB);
+                    localResult += (function(x1) + function(x2)) / 2 * (x2 - x1);
+                }
+                lock (lockObj)
+                {
+                    result += localResult;
+                }
+                barrier.SignalAndWait();
+            });
+            threads[i].Start();
+        }
+        barrier.SignalAndWait();
+        return result;
     }
 }
 
@@ -63,4 +91,4 @@ Assert.Equal(0, DefiniteIntegral.Solve(-1, 1, X, 1e-4, 2), 1e-4);
 
 Assert.Equal(0, DefiniteIntegral.Solve(-1, 1, SIN, 1e-5, 8), 1e-4);
 
-Assert.Equal(10, DefiniteIntegral.Solve(0, 10, X, 1e-6, 8), 1e-5);
+Assert.Equal(50, DefiniteIntegral.Solve(0, 10, X, 1e-6, 8), 1e-5);
