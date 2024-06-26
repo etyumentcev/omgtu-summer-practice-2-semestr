@@ -32,6 +32,8 @@
 
 #!csharp
 
+using System.Threading;
+using static System.Threading.Barrier;
 //
 // Вычисление определенного интеграла
 //
@@ -45,8 +47,37 @@ class DefiniteIntegral
     //
     public static double Solve(double a, double b, Func<double, double> function, double step, int threadsnumber)
     {
-        // отсюда надо начинать реализацию задачи
-        return 0.0;
+        double result = 0.0;
+        double segment = (b - a) / threadsnumber; // размер отрезка для каждого потока
+        Barrier barrier = new Barrier(threadsnumber + 1); // барьер с threadsnumber + 1 участниками, 1 главный добавляется
+        for (int i = 0; i < threadsnumber; i++)
+        {
+            double start = a + i * segment; // начало отрезка для потока
+            double end = start + segment; // конец
+            Thread t1 = new Thread(() => // создаем поток c методом его выполнения
+            {
+                double segmentresult = 0;
+                segmentresult += 0.5 * (function(start) + function(end)); // добавляем значения ф-ии на начале и конце сегмента
+                double a = (end - start) / step; // кол-во шагов
+                for (int j = 1; j < a; j++) // идем по сегменту с нашим шагом и добавляем значение ф-ии в точках
+                {
+                    double x = start + j * step;
+                    segmentresult += function(x);
+                }
+                segmentresult *= step; // результат по методу трапеции на сегменте отрезка
+                double newresult, output;
+                do // прибавляем результат на частях отрезка к общему
+                {
+                    newresult = result;
+                    output = newresult + segmentresult;
+                } 
+                while (Interlocked.CompareExchange(ref result, output, newresult) != newresult); // атомарное сравнение, если result = newresult, то добавляем в result output, если нет оставляем result
+                barrier.SignalAndWait(); // поток закончил выполняться и ждет остальные
+            });
+            t1.Start(); // запуск потока
+        }
+        barrier.SignalAndWait(); // ждем пока завершатся все потоки
+        return result;
     }
 }
 
@@ -63,4 +94,4 @@ Assert.Equal(0, DefiniteIntegral.Solve(-1, 1, X, 1e-4, 2), 1e-4);
 
 Assert.Equal(0, DefiniteIntegral.Solve(-1, 1, SIN, 1e-5, 8), 1e-4);
 
-Assert.Equal(10, DefiniteIntegral.Solve(0, 10, X, 1e-6, 8), 1e-5);
+Assert.Equal(50, DefiniteIntegral.Solve(0, 10, X, 1e-6, 8), 1e-5);
