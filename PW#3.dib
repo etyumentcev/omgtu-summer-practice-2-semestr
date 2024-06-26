@@ -32,9 +32,8 @@
 
 #!csharp
 
-//
-// Вычисление определенного интеграла
-//
+using System.Threading;
+
 class DefiniteIntegral
 {
     //
@@ -43,10 +42,41 @@ class DefiniteIntegral
     // step - размер одного шага разбиения
     // threadsNumber - число потоков, которые используются для вычислений
     //
+    static double square;
+    static Barrier barrier;
     public static double Solve(double a, double b, Func<double, double> function, double step, int threadsnumber)
     {
-        // отсюда надо начинать реализацию задачи
-        return 0.0;
+        square = 0;
+        barrier = new Barrier(threadsnumber);
+        List<Thread> threads = new List<Thread>();
+        for (int i = 0; i < threadsnumber; i++)
+        {
+            double start = a+i*(b-a)/threadsnumber;
+            double end = a+(i+1)*(b-a)/threadsnumber;
+            threads.Add(new Thread(() => ThreadCalculations(start, end, function, step)));
+        }
+
+        foreach (Thread thread in threads) thread.Start();
+        foreach (Thread thread in threads) thread.Join();
+        return square;
+    }
+
+    public static void ThreadCalculations(double a, double b, Func<double, double> function, double step)
+    {
+        int numSteps = (int)((b-a)/step);
+
+        double ThreadSquare = 
+            (from i in Enumerable.Range(0, numSteps)
+            select ((function(a + i*step) + function(a + i*step + step)) / 2) * step).Sum();
+
+        if (numSteps * step < b - a)
+        {
+            double x1 = a + numSteps*step;
+            ThreadSquare += ((function(x1) + function(b)) / 2) * (b - x1);
+        }
+
+        Interlocked.CompareExchange(ref square, square+ThreadSquare, square);
+        barrier.SignalAndWait();
     }
 }
 
@@ -63,4 +93,4 @@ Assert.Equal(0, DefiniteIntegral.Solve(-1, 1, X, 1e-4, 2), 1e-4);
 
 Assert.Equal(0, DefiniteIntegral.Solve(-1, 1, SIN, 1e-5, 8), 1e-4);
 
-Assert.Equal(10, DefiniteIntegral.Solve(0, 10, X, 1e-6, 8), 1e-5);
+Assert.Equal(50, DefiniteIntegral.Solve(0, 10, X, 1e-6, 8), 1e-5);
