@@ -32,6 +32,9 @@
 
 #!csharp
 
+using System;
+using System.Threading;
+using System.Threading.Tasks;
 //
 // Вычисление определенного интеграла
 //
@@ -46,7 +49,33 @@ class DefiniteIntegral
     public static double Solve(double a, double b, Func<double, double> function, double step, int threadsnumber)
     {
         // отсюда надо начинать реализацию задачи
-        return 0.0;
+        if (a == Double.PositiveInfinity || a == Double.NegativeInfinity ||
+            b == Double.PositiveInfinity || b == Double.NegativeInfinity ||
+            step == Double.PositiveInfinity || step == Double.NegativeInfinity)
+            throw new ArgumentException("Бесконечность на вводе!");
+        if (b < a)
+            throw new ArgumentException("Некорректные пределы!");
+        double result = 0;
+        double e = 1E-7;
+        double mstep = step / threadsnumber;
+        if (mstep < e) throw new ArgumentException("Слишком маленький шаг");
+        if (Math.Abs(b - a) < e) throw new ArgumentException("Слишком маленькая разница между пределами интеграла");
+        Barrier barrier = new Barrier(threadsnumber);
+        int n = Convert.ToInt32(Math.Floor((b - a) / step));
+        Parallel.For(0, threadsnumber, i =>
+        {
+            double lRes = 0;
+            for (int j = i; j < n; j += threadsnumber)
+            {
+                double x1 = a + j * step;
+                double x2 = a + (j + 1) * step;
+                lRes += (function(x1) + function(x2)) / 2 * step;
+            }
+            result += lRes;
+            barrier.SignalAndWait();
+        }
+        );
+        return result;
     }
 }
 
@@ -63,4 +92,4 @@ Assert.Equal(0, DefiniteIntegral.Solve(-1, 1, X, 1e-4, 2), 1e-4);
 
 Assert.Equal(0, DefiniteIntegral.Solve(-1, 1, SIN, 1e-5, 8), 1e-4);
 
-Assert.Equal(10, DefiniteIntegral.Solve(0, 10, X, 1e-6, 8), 1e-5);
+Assert.Equal(50, DefiniteIntegral.Solve(0, 10, X, 1e-6, 8), 1e-5);
