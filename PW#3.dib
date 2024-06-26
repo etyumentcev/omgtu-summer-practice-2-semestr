@@ -24,32 +24,26 @@
 Реализовать вычисление определенного интеграла методом трапеции в несколько потоков.
 
 Отрезок, на котором происходит вычисление, разбивается на отрезки по количеству потоков. Для каждого отрезка значение 
-интеграла считается в отдельном потоке, после завершения вычисоения полученный рельтаты суммирутся.
+интеграла считается в отдельном потоке, после завершения вычисления полученные рельтаты суммирутся.
 
 **Указание**.
-1. Для суммирования результатов удобно воспользоваться разделяемой переменной, к которой будут прибалятся результаты вычисления прямо в самом потоке. Для синхронизации операций сложения лучше всего восользоваться [Interlocked операцией](https://learn.microsoft.com/en-us/dotnet/api/system.threading.interlocked?view=net-8.0).
-2. Основная функция долна дождаться завершения всех потоков, которые вычисляют значение на отрезках, прежде чем возвратить результат. Для этого удобнее всего использовать Примитив синхронизации Барьер](https://learn.microsoft.com/ru-ru/dotnet/standard/threading/barrier).
+1. Для суммирования результатов удобно воспользоваться разделяемой переменной, к которой будут прибавлятся результаты вычисления прямо в самом потоке. Для синхронизации операций сложения лучше всего воспользоваться [Interlocked операцией](https://learn.microsoft.com/en-us/dotnet/api/system.threading.interlocked?view=net-8.0).
+2. Основная функция должна дождаться завершения всех потоков, которые вычисляют значение на отрезках, прежде чем возвратить результат. Для этого удобнее всего использовать Примитив синхронизации Барьер](https://learn.microsoft.com/ru-ru/dotnet/standard/threading/barrier).
 
 #!csharp
-
-//
-// Вычисление определенного интеграла
-//
 class DefiniteIntegral
 {
-    //
-    // a, b - границы отрезка, на котором происходит вычисление опредленного интеграла
-    // function - функция, для которой вычисляется определнный интеграл
-    // step - размер одного шага разбиения
-    // threadsNumber - число потоков, которые используются для вычислений
-    //
-    public static double Solve(double a, double b, Func<double, double> function, double step, int threadsnumber)
+    public static double Solve(double a, double b, Func<double, double> function, double step, int threadsNumber)
     {
-        // отсюда надо начинать реализацию задачи
-        return 0.0;
+        var res = 0.0; Barrier barrier = new Barrier(threadsNumber); 
+        Parallel.For(0, threadsNumber, state => { double start_for_thread = a + (b - a) / threadsNumber * state; double end_for_thread = start_for_thread + (b - a) / threadsNumber;
+            double localResult = function(start_for_thread + end_for_thread) / 2 + 
+            Enumerable.Range(1, Convert.ToInt32((end_for_thread - start_for_thread) / step) - 1).Select(point => function(start_for_thread + point * step)).Sum();
+            Interlocked.Exchange(ref res, res + localResult);
+            barrier.SignalAndWait(); });
+        return res * step;
     }
 }
-
 #!csharp
 
 #r "nuget: xunit, 2.8.1"
@@ -63,4 +57,4 @@ Assert.Equal(0, DefiniteIntegral.Solve(-1, 1, X, 1e-4, 2), 1e-4);
 
 Assert.Equal(0, DefiniteIntegral.Solve(-1, 1, SIN, 1e-5, 8), 1e-4);
 
-Assert.Equal(10, DefiniteIntegral.Solve(0, 10, X, 1e-6, 8), 1e-5);
+Assert.Equal(50, DefiniteIntegral.Solve(0, 10, X, 1e-6, 8), 1e-5);
