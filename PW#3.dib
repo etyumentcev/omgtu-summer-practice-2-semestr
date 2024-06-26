@@ -32,21 +32,61 @@
 
 #!csharp
 
-//
-// Вычисление определенного интеграла
-//
+using System;
+using System.Threading;
+
 class DefiniteIntegral
 {
-    //
-    // a, b - границы отрезка, на котором происходит вычисление опредленного интеграла
-    // function - функция, для которой вычисляется определнный интеграл
-    // step - размер одного шага разбиения
-    // threadsNumber - число потоков, которые используются для вычислений
-    //
-    public static double Solve(double a, double b, Func<double, double> function, double step, int threadsnumber)
+    private static double sharedResult;
+    private static Barrier barrier;
+
+    public static double Solve(double a, double b, Func<double, double> function, double step, int threadsNumber)
     {
-        // отсюда надо начинать реализацию задачи
-        return 0.0;
+        double detailSteps = step / 10;
+        sharedResult = 0.0;
+        barrier = new Barrier(threadsNumber);
+
+        Thread[] threads = new Thread[threadsNumber];
+        for (int i = 0; i < threadsNumber; i++)
+        {
+            int threadIndex = i;
+            threads[i] = new Thread(() =>
+            {
+                double localResult = CalculatePartialIntegral(a, b, function, detailSteps, threadsNumber, threadIndex);
+                Add(ref sharedResult, localResult);
+                barrier.SignalAndWait();
+            });
+            threads[i].Start();
+        }
+
+        foreach (Thread thread in threads) thread.Join();
+
+
+        return sharedResult;
+    }
+
+    private static double CalculatePartialIntegral(double a, double b, Func<double, double> function, double step, int threadsNumber, int threadIndex)
+    {
+        double localA = a + threadIndex * (b - a) / threadsNumber;
+        double localB = localA + (b - a) / threadsNumber;
+        double localResult = 0.0;
+
+        for (double x = localA; x < localB; x += step) localResult += (function(x) + function(x + step)) * step / 2.0;
+
+        if (localB > b - step) localResult += (function(b - step) + function(b)) * step / 2.0;
+
+        return localResult;
+    }
+
+    private static void Add(ref double location1, double value)
+    {
+        double newCurrentValue;
+        double currentValue = location1;
+        do
+        {
+            newCurrentValue = currentValue + value;
+        }
+        while (Interlocked.CompareExchange(ref location1, newCurrentValue, currentValue) != currentValue);
     }
 }
 
@@ -63,4 +103,4 @@ Assert.Equal(0, DefiniteIntegral.Solve(-1, 1, X, 1e-4, 2), 1e-4);
 
 Assert.Equal(0, DefiniteIntegral.Solve(-1, 1, SIN, 1e-5, 8), 1e-4);
 
-Assert.Equal(10, DefiniteIntegral.Solve(0, 10, X, 1e-6, 8), 1e-5);
+Assert.Equal(50, DefiniteIntegral.Solve(0, 10, X, 1e-6, 8), 1e-5);
