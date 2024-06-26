@@ -35,6 +35,8 @@
 //
 // Вычисление определенного интеграла
 //
+using System.Threading;
+
 class DefiniteIntegral
 {
     //
@@ -43,10 +45,68 @@ class DefiniteIntegral
     // step - размер одного шага разбиения
     // threadsNumber - число потоков, которые используются для вычислений
     //
+
+    class CalculateAndSumParameters() 
+    {
+        public double x1 {get; set;}
+        public double x2 {get; set;}
+        public int n {get; set;}
+        public Func<double, double> function {get;set;}
+    }
+
     public static double Solve(double a, double b, Func<double, double> function, double step, int threadsnumber)
     {
-        // отсюда надо начинать реализацию задачи
-        return 0.0;
+        double n = Math.Round(1.0 / step);
+        int epsAllowance = 4;
+        int countZeros = Convert.ToInt32(Math.Floor(Math.Log(n, 10)));
+        int eps = countZeros + epsAllowance;
+        double S = 0;
+        CountdownEvent countdown = new CountdownEvent(threadsnumber);
+        object locker = new object();
+
+        void CalculateAndSum(object state) 
+        {
+            var parameters = (CalculateAndSumParameters)state;
+            double x1 = parameters.x1;
+            double x2 = parameters.x2;
+            int n = parameters.n;
+            double dx = (x2 - x1) / n;
+            var function = parameters.function;
+
+            double _S = 0;
+
+            for (int i=0; i < n; i++) {
+                double a = x1 + dx * i;
+                double b = x1 + dx * (i + 1);
+                double s = Math.Round((function(a) + function(b)) / 2 * dx, eps);
+                _S += s;
+            }
+            
+            lock (locker) {
+                S += _S;
+            }
+            
+            countdown.Signal();
+        }
+
+        double ns = Math.Round(n / threadsnumber);
+        double part = (b - a) * (ns / n);
+        for (int i=0; i < threadsnumber; i++) 
+        {    
+            var v = new CalculateAndSumParameters {
+                x1 = a + part * i,
+                x2 = a + part * (i + 1),
+                n = (int)ns,
+                function = function
+            };
+            
+            var thread = new Thread(new ParameterizedThreadStart(CalculateAndSum));
+            thread.Start(v);
+        }
+        countdown.Wait();
+        int resultEps = 6;
+        S = Math.Round(S, resultEps);
+        return S;
     }
 }
 
@@ -59,8 +119,10 @@ using Xunit;
 var X = (double x) => x;
 var SIN = (double x) => Math.Sin(x);
 
-Assert.Equal(0, DefiniteIntegral.Solve(-1, 1, X, 1e-4, 2), 1e-4);
+DefiniteIntegral.Solve(-1, 1, X, 1e-2, 8);
 
-Assert.Equal(0, DefiniteIntegral.Solve(-1, 1, SIN, 1e-5, 8), 1e-4);
+Assert.Equal(0, DefiniteIntegral.Solve(-1, 1, X, 1e-6, 2), 1e-4);
 
-Assert.Equal(10, DefiniteIntegral.Solve(0, 10, X, 1e-6, 8), 1e-5);
+Assert.Equal(0, DefiniteIntegral.Solve(-1, 1, SIN, 1e-6, 8), 1e-4);
+
+Assert.Equal(50, DefiniteIntegral.Solve(0, 10, X, 1e-6, 8), 1e-5);
