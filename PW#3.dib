@@ -32,6 +32,7 @@
 
 #!csharp
 
+using System.Threading;
 //
 // Вычисление определенного интеграла
 //
@@ -39,20 +40,33 @@ class DefiniteIntegral
 {
     //
     // a, b - границы отрезка, на котором происходит вычисление опредленного интеграла
-    // function - функция, для которой вычисляется определнный интеграл
+    // function - функция, для которой вычисляется определнный интеграл|
     // step - размер одного шага разбиения
     // threadsNumber - число потоков, которые используются для вычислений
     //
     public static double Solve(double a, double b, Func<double, double> function, double step, int threadsnumber)
     {
-        // отсюда надо начинать реализацию задачи
-        return 0.0;
+        int n = Convert.ToInt32((b - a) / step);
+        int threadSize = n / threadsnumber;
+
+        double result = function(a) + function(b);
+        
+        Parallel.For(0, threadsnumber, i =>
+        {
+            double res = 0;
+            for (int j = threadSize * i; j < threadSize * (i + 1); j++)
+                res += 2 * function(a + j * step);
+            Interlocked.Exchange(ref result, (result + res));
+        });
+        return Math.Round(result * (step / 2));
     }
 }
 
 #!csharp
 
 #r "nuget: xunit, 2.8.1"
+
+#!csharp
 
 using Xunit;
 
@@ -63,4 +77,4 @@ Assert.Equal(0, DefiniteIntegral.Solve(-1, 1, X, 1e-4, 2), 1e-4);
 
 Assert.Equal(0, DefiniteIntegral.Solve(-1, 1, SIN, 1e-5, 8), 1e-4);
 
-Assert.Equal(10, DefiniteIntegral.Solve(0, 10, X, 1e-6, 8), 1e-5);
+Assert.Equal(50, DefiniteIntegral.Solve(0, 10, X, 1e-6, 8), 1e-5);
