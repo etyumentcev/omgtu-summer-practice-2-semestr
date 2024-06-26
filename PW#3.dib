@@ -34,7 +34,7 @@
 
 //
 // Вычисление определенного интеграла
-//
+using System.Threading;
 class DefiniteIntegral
 {
     //
@@ -46,7 +46,33 @@ class DefiniteIntegral
     public static double Solve(double a, double b, Func<double, double> function, double step, int threadsnumber)
     {
         // отсюда надо начинать реализацию задачи
-        return 0.0;
+        static bool Cheker(double x, double y)
+        {
+            return x - y > 1E-8;
+        }
+        if(!Cheker(b, a)) 
+        {
+            throw new Exception("Недопустимые входные данные");
+        }
+        double result = 0;
+        Barrier barrier = new Barrier(threadsnumber + 1);
+
+        for (int i = 0; i < threadsnumber; i++)
+        {
+            int threadIndex = i;
+            ThreadPool.QueueUserWorkItem((state) =>
+            {
+                double partialResult = 0;
+                for (double x = a + threadIndex * step; x < b; x += threadsnumber * step)
+                {
+                    partialResult += Math.Round((function(x) + function(x + step)) * step / 2, 8);
+                }
+                result += partialResult;
+                barrier.SignalAndWait();
+            });
+        }
+        barrier.SignalAndWait(); 
+        return result;
     }
 }
 
@@ -63,4 +89,4 @@ Assert.Equal(0, DefiniteIntegral.Solve(-1, 1, X, 1e-4, 2), 1e-4);
 
 Assert.Equal(0, DefiniteIntegral.Solve(-1, 1, SIN, 1e-5, 8), 1e-4);
 
-Assert.Equal(10, DefiniteIntegral.Solve(0, 10, X, 1e-6, 8), 1e-5);
+Assert.Equal(50, DefiniteIntegral.Solve(0, 10, X, 1e-6, 8), 1e-5);
