@@ -32,6 +32,7 @@
 
 #!csharp
 
+using System.Threading;
 //
 // Вычисление определенного интеграла
 //
@@ -45,8 +46,33 @@ class DefiniteIntegral
     //
     public static double Solve(double a, double b, Func<double, double> function, double step, int threadsnumber)
     {
-        // отсюда надо начинать реализацию задачи
-        return 0.0;
+        double rezult =0;
+        object lockk = new object();
+        Barrier barrier = new Barrier(threadsnumber + 1);
+        double colvost = (b-a)/threadsnumber; //количество шагов
+        Thread[] threads = new Thread[threadsnumber];
+        for (int i=0;i<threadsnumber;i++){
+            double ai = a+i*colvost;
+            double bi = ai+colvost;
+            threads[i] = new Thread(() =>
+            {
+                double integ=0;
+                int steps = Convert.ToInt32((bi - ai) / step);
+                for (int j = 0; j < steps; j++)
+                {
+                    double x = ai + j * step;
+                    double y = Math.Min(x + step, bi);
+                    integ += (function(x)+function(y))*0.5*(y-x);
+                }
+                lock(lockk){
+                rezult+=integ;
+                }
+                barrier.SignalAndWait();
+        });
+        threads[i].Start();
+        }
+        barrier.SignalAndWait();     
+        return rezult;
     }
 }
 
@@ -63,4 +89,4 @@ Assert.Equal(0, DefiniteIntegral.Solve(-1, 1, X, 1e-4, 2), 1e-4);
 
 Assert.Equal(0, DefiniteIntegral.Solve(-1, 1, SIN, 1e-5, 8), 1e-4);
 
-Assert.Equal(10, DefiniteIntegral.Solve(0, 10, X, 1e-6, 8), 1e-5);
+Assert.Equal(50, DefiniteIntegral.Solve(0, 10, X, 1e-6, 8), 1e-5);
