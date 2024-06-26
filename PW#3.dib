@@ -32,21 +32,35 @@
 
 #!csharp
 
-//
-// Вычисление определенного интеграла
-//
+using System;
+using System.Threading;
+using System.Threading.Tasks;
+using System.Linq;
+
 class DefiniteIntegral
 {
-    //
-    // a, b - границы отрезка, на котором происходит вычисление опредленного интеграла
-    // function - функция, для которой вычисляется определнный интеграл
-    // step - размер одного шага разбиения
-    // threadsNumber - число потоков, которые используются для вычислений
-    //
-    public static double Solve(double a, double b, Func<double, double> function, double step, int threadsnumber)
+    public static double Solve(double a, double b, Func<double, double> function, double step, int threadsNumber)
     {
-        // отсюда надо начинать реализацию задачи
-        return 0.0;
+        double answer = 0.0;
+        object lockObj = new object(); //Объект блокировки для синхронизации доступа к переменной answer из разных потоков
+        double threadSegmentLen = (b - a) / threadsNumber; //Длина одного сегмента, который будет обрабатываться одним потоком
+        Barrier barrier = new Barrier(threadsNumber); 
+
+        Parallel.For(0, threadsNumber, i =>
+        {
+            double start = a + i * threadSegmentLen;
+            double end = (i == threadsNumber - 1) ? b : start + threadSegmentLen;
+            double sum = Enumerable.Range(0, (int)((end - start) / step))
+            .Select(i => start + i * step)
+            .Sum(x => 0.5 * (function(x) + function(Math.Min(x + step, end))) * (Math.Min(x + step, end) - x));
+
+            lock (lockObj)
+                answer += sum;
+
+            barrier.SignalAndWait();
+        });
+
+        return answer;
     }
 }
 
@@ -63,4 +77,4 @@ Assert.Equal(0, DefiniteIntegral.Solve(-1, 1, X, 1e-4, 2), 1e-4);
 
 Assert.Equal(0, DefiniteIntegral.Solve(-1, 1, SIN, 1e-5, 8), 1e-4);
 
-Assert.Equal(10, DefiniteIntegral.Solve(0, 10, X, 1e-6, 8), 1e-5);
+Assert.Equal(50, DefiniteIntegral.Solve(0, 10, X, 1e-6, 8), 1e-5);
