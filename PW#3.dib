@@ -1,0 +1,128 @@
+#!meta
+
+{"kernelInfo":{"defaultKernelName":"csharp","items":[{"aliases":[],"languageName":"csharp","name":"csharp"}]}}
+
+#!markdown
+
+# Практическая работа №1. Знакомство с потоками.
+
+**Цель:** Познакомиться с возможностями класса System.Thread платформы .NET Framework.
+
+**Результаты:** После выполнения работы Вы сможете:
+1. Запускать длительные операции в отдельном потоке.
+2. Завершать поток.
+3. Дожидаться завершения выполнения потока. 
+
+
+**Материалы для самостоятельного изучения**.
+1. [Основы управления потоками](https://learn.microsoft.com/en-us/dotnet/standard/threading/managed-threading-basics)
+2. [Использование потоков](https://learn.microsoft.com/en-us/dotnet/standard/threading/using-threads-and-threading)
+3. [Примитив синхронизации Барьер](https://learn.microsoft.com/ru-ru/dotnet/standard/threading/barrier)
+4. [Interlocked операции](https://learn.microsoft.com/en-us/dotnet/api/system.threading.interlocked?view=net-8.0)
+
+## Задание.
+Реализовать вычисление определенного интеграла методом трапеции в несколько потоков.
+
+Отрезок, на котором происходит вычисление, разбивается на отрезки по количеству потоков. Для каждого отрезка значение 
+интеграла считается в отдельном потоке, после завершения вычисоения полученный рельтаты суммирутся.
+
+**Указание**.
+1. Для суммирования результатов удобно воспользоваться разделяемой переменной, к которой будут прибалятся результаты вычисления прямо в самом потоке. Для синхронизации операций сложения лучше всего восользоваться [Interlocked операцией](https://learn.microsoft.com/en-us/dotnet/api/system.threading.interlocked?view=net-8.0).
+2. Основная функция долна дождаться завершения всех потоков, которые вычисляют значение на отрезках, прежде чем возвратить результат. Для этого удобнее всего использовать Примитив синхронизации Барьер](https://learn.microsoft.com/ru-ru/dotnet/standard/threading/barrier).
+
+#!csharp
+
+//
+// Вычисление определенного интеграла
+//
+using System.Threading;
+
+class DefiniteIntegral
+{
+    //
+    // a, b - границы отрезка, на котором происходит вычисление опредленного интеграла
+    // function - функция, для которой вычисляется определнный интеграл
+    // step - размер одного шага разбиения
+    // threadsNumber - число потоков, которые используются для вычислений
+    //
+
+    class CalculateAndSumParameters() 
+    {
+        public double x1 {get; set;}
+        public double x2 {get; set;}
+        public int n {get; set;}
+        public Func<double, double> function {get;set;}
+    }
+
+    public static double Solve(double a, double b, Func<double, double> function, double step, int threadsnumber)
+    {
+        double n = Math.Round(1.0 / step);
+        int epsAllowance = 4;
+        int countZeros = Convert.ToInt32(Math.Floor(Math.Log(n, 10)));
+        int eps = countZeros + epsAllowance;
+        double S = 0;
+        CountdownEvent countdown = new CountdownEvent(threadsnumber);
+        object locker = new object();
+
+        void CalculateAndSum(object state) 
+        {
+            var parameters = (CalculateAndSumParameters)state;
+            double x1 = parameters.x1;
+            double x2 = parameters.x2;
+            int n = parameters.n;
+            double dx = (x2 - x1) / n;
+            var function = parameters.function;
+
+            double _S = 0;
+
+            for (int i=0; i < n; i++) {
+                double a = x1 + dx * i;
+                double b = x1 + dx * (i + 1);
+                double s = Math.Round((function(a) + function(b)) / 2 * dx, eps);
+                _S += s;
+            }
+            
+            lock (locker) {
+                S += _S;
+            }
+            
+            countdown.Signal();
+        }
+
+        double ns = Math.Round(n / threadsnumber);
+        double part = (b - a) * (ns / n);
+        for (int i=0; i < threadsnumber; i++) 
+        {    
+            var v = new CalculateAndSumParameters {
+                x1 = a + part * i,
+                x2 = a + part * (i + 1),
+                n = (int)ns,
+                function = function
+            };
+            
+            var thread = new Thread(new ParameterizedThreadStart(CalculateAndSum));
+            thread.Start(v);
+        }
+        countdown.Wait();
+        int resultEps = 6;
+        S = Math.Round(S, resultEps);
+        return S;
+    }
+}
+
+#!csharp
+
+#r "nuget: xunit, 2.8.1"
+
+using Xunit;
+
+var X = (double x) => x;
+var SIN = (double x) => Math.Sin(x);
+
+DefiniteIntegral.Solve(-1, 1, X, 1e-2, 8);
+
+Assert.Equal(0, DefiniteIntegral.Solve(-1, 1, X, 1e-6, 2), 1e-4);
+
+Assert.Equal(0, DefiniteIntegral.Solve(-1, 1, SIN, 1e-6, 8), 1e-4);
+
+Assert.Equal(50, DefiniteIntegral.Solve(0, 10, X, 1e-6, 8), 1e-5);
