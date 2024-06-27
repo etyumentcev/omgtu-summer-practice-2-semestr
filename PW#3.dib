@@ -32,6 +32,7 @@
 
 #!csharp
 
+using System.Threading;
 //
 // Вычисление определенного интеграла
 //
@@ -43,10 +44,40 @@ class DefiniteIntegral
     // step - размер одного шага разбиения
     // threadsNumber - число потоков, которые используются для вычислений
     //
+
     public static double Solve(double a, double b, Func<double, double> function, double step, int threadsnumber)
     {
         // отсюда надо начинать реализацию задачи
-        return 0.0;
+
+        if (a == Double.PositiveInfinity || a == Double.NegativeInfinity ||
+        b == Double.PositiveInfinity || b == Double.NegativeInfinity ||
+        step == Double.PositiveInfinity || step == Double.NegativeInfinity)
+            throw new ArgumentException("Бесконечность на вводе!");
+        if (b < a)
+            throw new ArgumentException("Некорректные пределы!");
+
+        double x = a;
+        double e = 1E-7;
+
+        if (step < e) throw new ArgumentException("Слишком маленький шаг");
+        if (Math.Abs(b - a) < e) throw new ArgumentException("Слишком маленькая разница между началом и концом интеграла");
+
+        int n = Convert.ToInt32(Math.Floor((b - a) / step));
+        Barrier barrier = new Barrier(threadsnumber); 
+        double result = 0.0;
+
+        Parallel.For(0, threadsnumber, i => 
+        {
+            double res = 0;
+            for (int j = i; j < n; j += threadsnumber)
+            {
+                res += (function(x + j * step) + function(x + (j + 1) * step)) * step / 2;
+            }
+            result += res;
+            barrier.SignalAndWait();
+        });
+
+        return result;
     }
 }
 
@@ -59,8 +90,8 @@ using Xunit;
 var X = (double x) => x;
 var SIN = (double x) => Math.Sin(x);
 
-Assert.Equal(0, DefiniteIntegral.Solve(-1, 1, X, 1e-4, 2), 1e-4);
-
-Assert.Equal(0, DefiniteIntegral.Solve(-1, 1, SIN, 1e-5, 8), 1e-4);
-
-Assert.Equal(10, DefiniteIntegral.Solve(0, 10, X, 1e-6, 8), 1e-5);
+Assert.Equal(0, DefiniteIntegral.Solve(-1, 1, X, 1e-4, 2), 1e-4); 
+ 
+Assert.Equal(0, DefiniteIntegral.Solve(-1, 1, SIN, 1e-5, 8), 1e-4); 
+ 
+Assert.Equal(50, DefiniteIntegral.Solve(0, 10, X, 1e-6, 8), 1e-5);
