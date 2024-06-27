@@ -34,7 +34,7 @@
 
 //
 // Вычисление определенного интеграла
-//
+using System.Threading;
 class DefiniteIntegral
 {
     //
@@ -46,7 +46,45 @@ class DefiniteIntegral
     public static double Solve(double a, double b, Func<double, double> function, double step, int threadsnumber)
     {
         // отсюда надо начинать реализацию задачи
-        return 0.0;
+        static bool Cheker(double x, double y)
+        {
+            return x - y > 1E-8;
+        }
+        if(!Cheker(b, a)) 
+        {
+            throw new Exception("Недопустимые входные данные");
+        }
+        double result = 0;
+        Barrier barrier = new Barrier(threadsnumber + 1);
+
+        for (int i = 0; i < threadsnumber; i++)
+        {
+            int threadIndex = i;
+            ThreadPool.QueueUserWorkItem((q) =>
+            {
+                double partialResult = 0;
+                for (double x = a + threadIndex * step; x < b; x += threadsnumber * step)
+                {
+                    partialResult += Math.Round((function(x) + function(x + step)) * step / 2, 7);
+                }
+                result += partialResult;
+                barrier.SignalAndWait();
+            });
+        }
+        barrier.SignalAndWait(); 
+        return result;
+    }
+
+   public static double SolveOneThread(double a, double b, Func<double, double> function, double step)
+    {
+        double result = 0;
+        double partialResult = 0;
+                for (double x = a + step; x < b; x += step)
+                {
+                    result += Math.Round((function(x) + function(x + step)) * step / 2, 7);
+                }
+                result += Math.Round(partialResult, 5);
+        return result;
     }
 }
 
@@ -61,6 +99,82 @@ var SIN = (double x) => Math.Sin(x);
 
 Assert.Equal(0, DefiniteIntegral.Solve(-1, 1, X, 1e-4, 2), 1e-4);
 
-Assert.Equal(0, DefiniteIntegral.Solve(-1, 1, SIN, 1e-5, 8), 1e-4);
+Assert.Equal(0, DefiniteIntegral.Solve(-1, 1, SIN, 1e-4, 8), 1e-4);
 
-Assert.Equal(10, DefiniteIntegral.Solve(0, 10, X, 1e-6, 8), 1e-5);
+Assert.Equal(50, DefiniteIntegral.Solve(0, 10, X, 1e-6, 8), 1e-5);
+
+#!csharp
+
+#r "nuget: xunit, 2.8.1"
+
+using Xunit;
+double ans = 0;
+var SIN = (double x) => Math.Sin(x);
+for (double i = 1e-1; i> 1e-7; i = i/10){
+try{
+    Assert.Equal(0, DefiniteIntegral.Solve(-100, 100, SIN, i, 8), 1e-4);
+    ans = i;
+    break;
+    } catch(Exception e){};
+    
+}
+ans
+
+#!csharp
+
+using Microsoft.DotNet.Interactive.Formatting;
+using System.Diagnostics;
+Formatter.Register(typeof(ScottPlot.Plot), (p, w) => 
+    w.Write(((ScottPlot.Plot)p).GetImageHtml(400, 300)), HtmlFormatter.MimeType);
+    long[] longs = new long[10];
+for (int i = 0; i<10; i++){
+long Times = int.MaxValue;
+int Potok = 0;
+double Value = 0;
+ScottPlot.Plot plt = new();
+Stopwatch stopWatch = new Stopwatch();
+
+ for (int threadsNumber = 1; threadsNumber <= 20; threadsNumber++)
+        {
+            stopWatch.Restart();
+            double ParticalValue = 0;
+            ParticalValue = DefiniteIntegral.Solve(-100, 100, SIN, 1e-4, threadsNumber);
+            stopWatch.Stop();
+            if(Times > stopWatch.ElapsedMilliseconds)
+            {
+                Value = ParticalValue;
+                Times = stopWatch.ElapsedMilliseconds;
+                Potok = threadsNumber;
+            }
+            plt.Add.Scatter(stopWatch.ElapsedMilliseconds, threadsNumber);
+        }
+    longs[i] = Times;
+}
+double?average = longs.AsQueryable().Average();
+Console.WriteLine("Наилучшее время выполенения: {0} за {1} потоков (значение: {2})", average, Potok, Value);
+Console.WriteLine("Решение в один поток: " + DefiniteIntegral.SolveOneThread(-100, 100, SIN, 1e-4));
+plt
+
+#!csharp
+
+using System.Diagnostics;
+Stopwatch stopWatch = new Stopwatch();
+long[] longs = new long[10];
+for (int i = 0; i<10; i++){
+stopWatch.Restart();
+DefiniteIntegral.SolveOneThread(-100, 100, SIN, 1e-4);
+stopWatch.Stop();
+longs[i] = stopWatch.ElapsedMilliseconds;
+}
+double?average = longs.AsQueryable().Average();
+average
+
+#!markdown
+
+Оптимальный размер шага был определён в 4 ячейке и составил 0,0001 (или 1e-4).
+
+Оптимальное количество потоков было определено в 5 ячейке и составил 11 потоков, график составлен в той же ячейке.
+
+Было сделано 10 замеров 11-ти поточного и однопоточного решения, был вычислен средний результат каждого. Для 11-ти поточного он составил 5 миллисекунд, для однопоточного 32 миллисекунды
+
+Разница в эффективности по времени составляет 15,625%
