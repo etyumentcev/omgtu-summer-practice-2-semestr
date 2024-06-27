@@ -35,6 +35,8 @@
 //
 // Вычисление определенного интеграла
 //
+using System.Threading;
+
 class DefiniteIntegral
 {
     //
@@ -43,10 +45,84 @@ class DefiniteIntegral
     // step - размер одного шага разбиения
     // threadsNumber - число потоков, которые используются для вычислений
     //
+
+    class CalculateAndSumParameters() 
+    {
+        public double x1 {get; set;}
+        public double x2 {get; set;}
+        public int n {get; set;}
+        public Func<double, double> function {get;set;}
+    }
+
     public static double Solve(double a, double b, Func<double, double> function, double step, int threadsnumber)
     {
-        // отсюда надо начинать реализацию задачи
-        return 0.0;
+        double n = (b - a) * Math.Round(1.0 / step);
+        int epsAllowance = 4;
+        int countZeros = Convert.ToInt32(Math.Floor(Math.Log(n, 10)));
+        int eps = countZeros + epsAllowance;
+        double S = 0;
+        CountdownEvent countdown = new CountdownEvent(threadsnumber);
+        object locker = new object();
+
+        void CalculateAndSum(object state) 
+        {
+            var parameters = (CalculateAndSumParameters)state;
+            double x1 = parameters.x1;
+            double x2 = parameters.x2;
+            int n = parameters.n;
+            double dx = (x2 - x1) / n;
+            var function = parameters.function;
+            double _S = 0;
+            for (int i=0; i < n; i++) {
+                double a = x1 + dx * i;
+                double b = x1 + dx * (i + 1);
+                double s = Math.Round((function(a) + function(b)) / 2 * dx, eps);
+                _S += s;
+            }
+            lock (locker) {
+                S += _S;
+            }
+            countdown.Signal();
+        }
+
+        double ns = Math.Round(n / threadsnumber);
+        double part = (b - a) * (ns / n);
+        for (int i=0; i < threadsnumber; i++) 
+        {    
+            var v = new CalculateAndSumParameters {
+                x1 = a + part * i,
+                x2 = a + part * (i + 1),
+                n = (int)ns,
+                function = function
+            };
+            
+            var thread = new Thread(new ParameterizedThreadStart(CalculateAndSum));
+            thread.Start(v);
+        }
+        countdown.Wait();
+        int resultEps = 6;
+        S = Math.Round(S, resultEps);
+        return S;
+    }
+
+
+    public static double OneThreadSolve(double a, double b, Func<double, double> function, double step) {
+        double n = (b - a) * Math.Round(1.0 / step);
+        int epsAllowance = 4;
+        int countZeros = Convert.ToInt32(Math.Floor(Math.Log(n, 10)));
+        int eps = countZeros + epsAllowance;
+
+        int resultEps = 6;
+        double dx = (b - a) / n;
+        double S = 0;
+        for (int i=0; i < n; i++) {
+            double x1 = a + dx * i;
+            double x2 = a + dx * (i + 1);
+            double s = Math.Round((function(x1) + function(x2)) / 2 * dx, eps);
+            S=S+s;
+        }
+        S = Math.Round(S, resultEps);
+        return S;
     }
 }
 
@@ -63,4 +139,106 @@ Assert.Equal(0, DefiniteIntegral.Solve(-1, 1, X, 1e-4, 2), 1e-4);
 
 Assert.Equal(0, DefiniteIntegral.Solve(-1, 1, SIN, 1e-5, 8), 1e-4);
 
-Assert.Equal(10, DefiniteIntegral.Solve(0, 10, X, 1e-6, 8), 1e-5);
+Assert.Equal(50, DefiniteIntegral.Solve(0, 10, X, 1e-6, 8), 1e-5);
+
+#!csharp
+
+double[] steps = new double[] {1e-1, 1e-2, 1e-3, 1e-4, 1e-5, 1e-6};
+double correct = 50;
+double answerEps = 1e-4;
+double stepForCalculate = 1e-3; // с шагом меньше расчеты занимают много времени
+double optimalStep;
+
+bool tryForThreads(double step, int maxThreads) {
+    for (int t = 1; t <= maxThreads; t++) {
+        if (Math.Abs(DefiniteIntegral.Solve(0, 10, X, step, t) - correct) > answerEps) {
+            return false;
+        }
+    }
+    return true;
+}
+
+for (int i = 0; i < steps.Length; i++) {
+    if (tryForThreads(steps[i], 8)) {
+        optimalStep = steps[i];
+        break;
+    }
+}
+
+Console.WriteLine($"Оптимальный шаг для расчетов с разным количеством потоков: {optimalStep}");
+
+#!csharp
+
+#r "nuget:ScottPlot, 5.0.35"
+using Microsoft.DotNet.Interactive.Formatting;
+using System.Diagnostics;
+
+Formatter.Register(typeof(ScottPlot.Plot), (p, w) => 
+    w.Write(((ScottPlot.Plot)p).GetImageHtml(400, 300)), HtmlFormatter.MimeType);
+
+#!csharp
+
+var SIN = (double x) => Math.Sin(x);
+
+Stopwatch watch = new Stopwatch();
+int testsNumber = 100;
+int maxThreads = 16;
+List<double> resultsInMilliseconds = new List<double>();
+
+for (int i=1; i <= maxThreads; i++) {
+    watch.Start();
+    for (int j=0; j < testsNumber; j++) {
+        DefiniteIntegral.Solve(-100, 100, SIN, stepForCalculate, i); // уменьшаем шаг, так как с большим значением самым эффективным оказывается однопоточный вариант(
+    }
+    watch.Stop();
+    resultsInMilliseconds.Add(watch.ElapsedMilliseconds / (double)testsNumber);
+    watch.Restart();
+}
+
+
+// create sample data
+int[] dataX = Enumerable.Range(1, maxThreads).ToArray();
+double[] dataY = resultsInMilliseconds.ToArray();
+double bestResult = dataY.Min();
+double bestThreadNumber = dataX[resultsInMilliseconds.IndexOf(bestResult)];
+
+// plot the data
+ScottPlot.Plot plt = new();
+plt.Add.Scatter(dataX, dataY);
+plt.XLabel("Threads numbers");
+plt.YLabel("Duration in milliseconds");
+plt.Title($"Best result: {bestResult} milliseconds");
+// display the plot
+plt
+
+#!csharp
+
+// Сравниваем лучший резульат с однопоточной версией
+
+Stopwatch watch = new Stopwatch();
+
+List<double> results = new List<double>();
+double oneThreadResult;
+int iterationNumber = 10;
+for (int j=0; j < iterationNumber; j++) {
+    watch.Start();
+    for (int i=0; i < testsNumber; i++) {
+        DefiniteIntegral.OneThreadSolve(-100, 100, SIN, stepForCalculate);
+    }
+    watch.Stop();
+    results.Add(watch.ElapsedMilliseconds / (double)testsNumber);
+    watch.Restart();
+}
+oneThreadResult = results.Sum() / (double)iterationNumber;
+
+double timeDiffPercent = Math.Round((oneThreadResult / bestResult - 1) * 100, 2);
+Console.WriteLine($"Многопоточная версия с {bestThreadNumber} потоками в среднем на {timeDiffPercent}% быстрее однопоточной");
+
+#!csharp
+
+// Summary
+
+// Оптимальный шаг: 1e-6
+// Оптимальное число потоков: 6 - 8
+// Лучший результат многопоточной версии: 1.2 ms (8 потоков, расчет интеграла синуса от -100 до 100, с шагом 1e-3)
+// Версия оптимальным числом потоков работает в среднем на 170% быстрее однопоточной
