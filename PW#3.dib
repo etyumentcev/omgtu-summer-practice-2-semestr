@@ -31,6 +31,11 @@
 2. Основная функция должна дождаться завершения всех потоков, которые вычисляют значение на отрезках, прежде чем возвратить результат. Для этого удобнее всего использовать Примитив синхронизации Барьер](https://learn.microsoft.com/ru-ru/dotnet/standard/threading/barrier).
 
 #!csharp
+using System;
+using System.Threading;
+#!csharp
+
+#!csharp
 class DefiniteIntegral
 {
     public static double Solve(double a, double b, Func<double, double> function, double step, int threadsNumber)
