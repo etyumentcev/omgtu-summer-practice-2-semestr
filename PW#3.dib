@@ -32,9 +32,18 @@
 
 #!csharp
 
+using System.Threading;
 //
 // Вычисление определенного интеграла
 //
+class Part
+{
+    public double start;
+    public double end;
+    public Func<double, double> function;
+    public double step;
+    public double res;   
+}
 class DefiniteIntegral
 {
     //
@@ -43,10 +52,37 @@ class DefiniteIntegral
     // step - размер одного шага разбиения
     // threadsNumber - число потоков, которые используются для вычислений
     //
+    static int Counter = 0;
+    public static void ProcessItself(object obj) 
+    {
+        Part p_obj = obj as Part;
+        int divisions = (int)((p_obj.end - p_obj.start) / p_obj.step);
+        for (int i = 0; i < divisions; i++)
+        {
+            double sum = p_obj.res + 
+                (p_obj.function(p_obj.start + p_obj.step * i) + p_obj.function(p_obj.start + p_obj.step * (i + 1))) / 2 * p_obj.step;
+            Interlocked.Exchange(ref p_obj.res, sum);
+        }
+        Interlocked.Increment(ref Counter);
+    }
     public static double Solve(double a, double b, Func<double, double> function, double step, int threadsnumber)
     {
+        Counter = 0;
+        Part[] parts = new Part[threadsnumber];
+        Thread myThread;
+        for (int i = 1; i <= threadsnumber; i++)
+        {
+            parts[i - 1] = new Part() { start = a + (b - a) / threadsnumber * (i - 1),
+                end = a + (b - a) / threadsnumber * i, function = function, step = step, res = 0.0};
+            myThread = new Thread(new ParameterizedThreadStart(ProcessItself));
+
+            myThread.Start(parts[i - 1]);
+        }
+        double result = 0.0;
+        while (Counter != threadsnumber) { }
+        foreach (Part part in parts) { result += part.res; }
         // отсюда надо начинать реализацию задачи
-        return 0.0;
+        return result;
     }
 }
 
@@ -58,9 +94,8 @@ using Xunit;
 
 var X = (double x) => x;
 var SIN = (double x) => Math.Sin(x);
-
 Assert.Equal(0, DefiniteIntegral.Solve(-1, 1, X, 1e-4, 2), 1e-4);
 
 Assert.Equal(0, DefiniteIntegral.Solve(-1, 1, SIN, 1e-5, 8), 1e-4);
 
-Assert.Equal(10, DefiniteIntegral.Solve(0, 10, X, 1e-6, 8), 1e-5);
+Assert.Equal(50, DefiniteIntegral.Solve(0, 10, X, 1e-6, 8), 1e-5);
