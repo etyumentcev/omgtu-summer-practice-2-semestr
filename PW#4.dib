@@ -32,7 +32,13 @@
 
 #!csharp
 
+#r "nuget:ScottPlot, 5.0.35"
+
 using System.Threading;
+using System.Diagnostics;
+using Microsoft.DotNet.Interactive.Formatting;
+Formatter.Register(typeof(ScottPlot.Plot), (p, w) => 
+    w.Write(((ScottPlot.Plot)p).GetImageHtml(400, 300)), HtmlFormatter.MimeType);
 //
 // Вычисление определенного интеграла
 //
@@ -79,7 +85,150 @@ class DefiniteIntegral
 
         return result;
     }
+
+    public static double SimpleSolve(double a, double b, Func<double, double> function, double step)
+    {
+        if (a == Double.PositiveInfinity || a == Double.NegativeInfinity ||
+        b == Double.PositiveInfinity || b == Double.NegativeInfinity ||
+        step == Double.PositiveInfinity || step == Double.NegativeInfinity)
+            throw new ArgumentException("Бесконечность на вводе!");
+        if (b < a)
+            throw new ArgumentException("Некорректные пределы!");
+
+        double x = a;
+        double e = 1E-7;
+
+        if (step < e) throw new ArgumentException("Слишком маленький шаг");
+        if (Math.Abs(b - a) < e) throw new ArgumentException("Слишком маленькая разница между началом и концом интеграла");
+
+        double result = 0.0;
+
+        int n = Convert.ToInt32(Math.Floor((b - a) / step));
+
+        result = Enumerable.Range(1, n)
+            .Select(i => (function(x + i * step) + function((x + (i - 1) * step))) / 2 * step)
+            .Sum();
+        
+        if (((b - a) / step - n) > e){
+            result += (function(b) + function((x + n * step))) / 2 * (b - (x + n * step));
+        }
+
+        return result;
+    }
 }
+
+// Поиск минимального размера шага, обеспечивающего
+// максимальную производительность
+
+var SIN = (double x) => Math.Sin(x);
+
+// Машинный ноль
+double e = 1E-7;
+
+double[] steps = {
+    1e-1, 1e-2, 1e-3, 1e-4, 1e-5, 1e-6
+};
+
+double min_in_time = 10e9;
+int best_step_ind;
+
+for(int i = 0; i < steps.Length; i++)
+{
+    Stopwatch stopWatch = new Stopwatch();
+    stopWatch.Start();   
+    double val = DefiniteIntegral.Solve(-100, 100, SIN, steps[i], 8);
+    stopWatch.Stop();
+    double integr_time = stopWatch.Elapsed.TotalSeconds;
+
+    Console.WriteLine($"Шаг 1e-{i + 1};\tВремя расчёта: {Math.Round(integr_time, 4)} c.");
+    if (integr_time < min_in_time)
+    {
+        min_in_time = integr_time;
+        best_step_ind = i;
+    }
+}
+
+Console.WriteLine($"Оптимальный шаг - 1e-{best_step_ind + 1}");
+
+double best_step = steps[best_step_ind];
+
+List<double>[] lst = new List<double>[20];
+for(int i = 0; i < lst.Length; i++)
+    lst[i] = new List<double>();
+
+for (int tr = 0; tr < 10; tr++)
+{
+    for (int thr_num = 1; thr_num < 21; thr_num++)
+    {
+        Stopwatch stopWatch = new Stopwatch();
+        stopWatch.Start();
+        double value = DefiniteIntegral.Solve(-100, 100, SIN, best_step, thr_num);
+        stopWatch.Stop();
+        double time = stopWatch.Elapsed.TotalSeconds;
+        lst[thr_num - 1].Add(time);
+    }
+}
+
+int i = 0;
+double min_time = 10e9;
+int optimal_thr_num = 0;
+double[] average_time = new double[20];
+foreach(List<double> l in lst) 
+{
+    double t = l.Average();
+    average_time[i] = t;
+    if (t < min_time)
+    {
+        min_time = t;
+        optimal_thr_num = i + 1;
+    }
+    i++;
+}
+
+int[] numbers = Enumerable.Range(1, 20).ToArray();
+
+ScottPlot.Plot plt = new();
+plt.Add.Scatter(average_time, numbers);
+
+plt.SavePng("график.png", 600, 400);
+
+// Засечем время для SimpleSolve
+
+List<double> tryes = new List<double>();
+
+for (int tr = 0; tr < 10; tr++)
+{
+    Stopwatch stopWatch = new Stopwatch();
+    stopWatch.Start();
+    double value = DefiniteIntegral.SimpleSolve(-100, 100, SIN, best_step);
+    stopWatch.Stop();
+    double simp_time = stopWatch.Elapsed.TotalSeconds;
+    tryes.Add(simp_time);
+}
+double simple_time = tryes.Average();
+Console.WriteLine($"Время SimpleSolve: {Math.Round(simple_time, 4)} с");
+Console.WriteLine($"Наименьшее время Solve: {Math.Round(min_time, 4)} с (число потоков - {optimal_thr_num})");
+
+int percent = Convert.ToInt32(Math.Floor(Math.Abs(simple_time - min_time) / simple_time * 100));
+Console.WriteLine($"Разница значений: {percent}%");
+if (percent >= 15 && min_time < simple_time)
+    Console.WriteLine("Оптимизация не нужна. Многопоточная программа работает быстрее");
+
+#!markdown
+
+Summary
+
+Размер шага: 1е-2
+
+Оптимальное количество потоков: 9
+
+Время работы программы с потоками: 0.0002 с.
+
+Время работы обычной программы: 0.0008 с.
+
+Разница в процентах: 75%
+
+(значения могут меняться взависимости от загрузки процессора)
 
 #!csharp
 
