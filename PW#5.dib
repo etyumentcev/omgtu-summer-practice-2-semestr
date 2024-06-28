@@ -56,11 +56,74 @@ class Message
 #!csharp
 
 using System.Collections.Concurrent;
-
+using System.Threading;
 var queue1 = new BlockingCollection<Message>(2); //очередь первого потока
 var queue2 = new BlockingCollection<Message>(2); //очередь второго потока
 
 // Здесь писать решение
+Thread sol1 = new Thread(()=>{
+    Message Wrts1 = new Message();
+    queue2.Add(Wrts1);
+    Message data1 = null;
+    int l=0;
+
+    while (!queue1.IsCompleted)
+    {
+        data1 = null;
+        try
+        {
+            data1 = queue1.Take();
+        }
+        catch (InvalidOperationException) {}
+        if (data1 != null)
+        {
+            data1.Handle();
+            Message Wrt1 =null;
+            Wrt1 = new Message();
+            l++;
+            if (l>=100)
+            {
+                break;
+            }
+            queue2.Add(Wrt1);
+        }
+    }
+});
+int k=0;
+Thread sol2 = new Thread(()=>{
+    Message Wrts2 = new Message();
+    queue1.Add(Wrts2);
+    k=0;
+    Message data2 = null;
+    while (!queue2.IsCompleted)
+    {
+        
+
+        data2 = null;
+        try
+        {
+            data2 = queue2.Take();
+        }
+        catch (InvalidOperationException) {
+         }
+        if (data2 != null)
+        {
+        data2.Handle();
+        Message Wrt2=null;
+        Wrt2 = new Message();
+        k++;
+        if (k>=100)
+        {
+            break;
+        }
+        queue1.Add(Wrt2);
+        }
+    }
+});
+sol1.Start();
+sol2.Start();
+sol1.Join();
+sol2.Join();
 
 #!csharp
 
