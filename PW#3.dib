@@ -47,7 +47,6 @@ class DefiniteIntegral
     public static double Solve(double a, double b, Func<double, double> function, double step, int threadsnumber)
     {
         double rezult =0;
-        object lockk = new object();
         Barrier barrier = new Barrier(threadsnumber + 1);
         double colvost = (b-a)/threadsnumber; //количество шагов
         Thread[] threads = new Thread[threadsnumber];
@@ -64,9 +63,7 @@ class DefiniteIntegral
                     double y = Math.Min(x + step, bi);
                     integ += (function(x)+function(y))*0.5*(y-x);
                 }
-                lock(lockk){
                 rezult+=integ;
-                }
                 barrier.SignalAndWait();
         });
         threads[i].Start();
