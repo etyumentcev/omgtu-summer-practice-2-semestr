@@ -56,11 +56,32 @@ class Message
 #!csharp
 
 using System.Collections.Concurrent;
-
+using System.Threading;
 var queue1 = new BlockingCollection<Message>(2); //очередь первого потока
 var queue2 = new BlockingCollection<Message>(2); //очередь второго потока
-
-// Здесь писать решение
+Barrier barrier = new(2);
+Thread thread = new Thread(() =>
+{
+    for(int i = 0; i<100; i++){
+        Message a = queue1.Take();
+        a.Handle();
+        queue2.Add(new Message());
+    }
+    barrier.SignalAndWait();
+});
+Thread thread1 = new Thread(() =>
+{
+    Barrier br1 = new(1);
+    for(int i = 0; i<100; i++){
+        Message b = queue2.Take();
+        b.Handle();
+        queue1.Add(new Message());
+    }
+    queue1.Take();
+    barrier.SignalAndWait();
+});
+    queue1.Add(new Message());
+thread.Start(); thread1.Start();
 
 #!csharp
 
