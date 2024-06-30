@@ -37,10 +37,233 @@
 Для этого следует использовать условные события, которые позволят убедиться, что оба потока запустились и готовы читать и писать объекты и только потом запускать таймер.
 2. Для итогового вывода сравнивать усредненные значения.
 
-#!markdown
+#!csharp
 
-// здесь писать код
+using System;
+using System.Collections.Concurrent;
+using System.Collections.Generic;
+using System.Diagnostics;
+using System.Threading;
+using System.Threading.Tasks;
+const int Million = 1000000;
+MeasurePerformance("BlockingCollection", RunBlockingCollection);
+
+MeasurePerformance("ConcurrentQueue", RunConcurrentQueue);
+        
+MeasurePerformance("Непотокобезопасный Queue", RunNonThreadSafeQueue);
+    static void MeasurePerformance(string collectionName, Action action)
+    {
+        Console.WriteLine($"--- {collectionName} ---");
+
+        for (int i = 0; i < 10; i++)
+        {
+            var stopwatch = Stopwatch.StartNew();
+            action();
+            stopwatch.Stop();
+
+            Console.WriteLine($"Замер {i + 1}: {stopwatch.ElapsedMilliseconds} мс");
+        }
+
+        Console.WriteLine();
+    }
+
+    static void RunBlockingCollection()
+    {
+        var queue = new BlockingCollection<int>();
+        
+        var producerTask = Task.Run(() =>
+        {
+            for (int i = 0; i < Million; i++)
+            {
+                queue.Add(i);
+            }
+        });
+
+        var consumerTask = Task.Run(() =>
+        {
+            for (int i = 0; i < Million; i++)
+            {
+                queue.Take();
+            }
+        });
+
+        Task.WaitAll(producerTask, consumerTask);
+    }
+
+    static void RunConcurrentQueue()
+    {
+        var queue = new ConcurrentQueue<int>();
+
+        var producerTask = Task.Run(() =>
+        {
+            for (int i = 0; i < Million; i++)
+            {
+                queue.Enqueue(i);
+            }
+        });
+
+        var consumerTask = Task.Run(() =>
+        {
+            for (int i = 0; i < Million; i++)
+            {
+                int value;
+                queue.TryDequeue(out value);
+            }
+        });
+
+        Task.WaitAll(producerTask, consumerTask);
+    }
+
+    static void RunNonThreadSafeQueue()
+    {
+        var queue = new Queue<int>();
+        for (int i = 0; i < Million;i++)
+        {
+            queue.Enqueue(i);
+        }
+        for (int i = 0; i < Million; i++)
+        {
+            queue.Dequeue();
+        }
+    }
 
 #!markdown
 
 ## Вывод
+Средние результаты:
+- BlockingCollection --- 207,6 ms
+- ConcurrentQueue ---  10,9 ms
+- Непотокобезопасный --- 13 ms
+
+#!markdown
+
+- ConcurrentQueue - намного эффективнее BlockingCollection и имеет преимущество над непотокобезопасными очередями. ConcurrentQueue на 13% эффективнее непотокобезопасной очереди.
+- в потокобезопасных очередях время записи и чтения в среднем равны, у потоконебезпасной очереди - запись бывает намного дольше чтения.
+
+#!csharp
+
+using System;
+using System.Collections.Concurrent;
+using System.Collections.Generic;
+using System.Diagnostics;
+using System.Threading;
+
+private const int Million = 1000000;
+
+MeasurePerformance("BlockingCollection", RunBlockingCollection);
+       
+MeasurePerformance("ConcurrentQueue", RunConcurrentQueue);
+        
+MeasurePerformance("непотокобезопасный Queue", RunNonThreadSafeQueue);
+
+    static void MeasurePerformance(string collectionName, Action action)
+    {
+        Console.WriteLine($"--- {collectionName} ---");
+
+        for (int i = 0; i < 10; i++)
+        {
+            var stopwatch = Stopwatch.StartNew();
+            action();
+            stopwatch.Stop();
+
+            Console.WriteLine($"Замер {i + 1}: {stopwatch.ElapsedMilliseconds} мс");
+        }
+
+        Console.WriteLine();
+    }
+
+    static void RunBlockingCollection()
+    {
+        var queue = new BlockingCollection<int>();
+
+        // Запись
+        var producerThread = new Thread(() =>
+        {
+            Stopwatch stopwatch = Stopwatch.StartNew();
+            for (int i = 0; i < Million; i++)
+            {
+                queue.Add(i);
+            }
+            stopwatch.Stop();
+            Console.WriteLine($"Время записи миллиона объектов: {stopwatch.ElapsedMilliseconds} мс");
+        });
+
+        producerThread.Start();
+        producerThread.Join();
+
+        // Чтение
+        var consumerThread = new Thread(() =>
+        {
+            Stopwatch stopwatch = Stopwatch.StartNew();
+            for (int i = 0; i < Million; i++)
+            {
+                queue.Take();
+            }
+            stopwatch.Stop();
+            Console.WriteLine($"Время чтения миллиона объектов: {stopwatch.ElapsedMilliseconds} мс");
+        });
+
+        consumerThread.Start();
+        consumerThread.Join();
+    }
+
+    static void RunConcurrentQueue()
+    {
+        var queue = new ConcurrentQueue<int>();
+
+        // Запись
+        var producerThread = new Thread(() =>
+        {
+            Stopwatch stopwatch = Stopwatch.StartNew();
+            for (int i = 0; i < Million; i++)
+            {
+                queue.Enqueue(i);
+            }
+            stopwatch.Stop();
+            Console.WriteLine($"Время записи миллиона объектов: {stopwatch.ElapsedMilliseconds} мс");
+        });
+
+        producerThread.Start();
+        producerThread.Join();
+
+        // Чтение
+        var consumerThread = new Thread(() =>
+        {
+            Stopwatch stopwatch = Stopwatch.StartNew();
+            for (int i = 0; i < Million; i++)
+            {
+                int value;
+                queue.TryDequeue(out value);
+            }
+            stopwatch.Stop();
+            Console.WriteLine($"Время чтения миллиона объектов: {stopwatch.ElapsedMilliseconds} мс");
+        });
+
+        consumerThread.Start();
+        consumerThread.Join();
+    }
+
+    static void RunNonThreadSafeQueue()
+    {
+        var queue = new Queue<int>();
+
+        Stopwatch stopwatch = Stopwatch.StartNew();
+
+        // Запись
+        for (int i = 0; i < Million; i++)
+        {
+            queue.Enqueue(i);
+        }
+
+        Console.WriteLine($"Время записи миллиона объектов: {stopwatch.ElapsedMilliseconds} мс");
+
+        stopwatch.Restart();
+
+        // Чтение
+        for (int i = 0; i < Million; i++)
+        {
+            queue.Dequeue();
+        }
+
+        Console.WriteLine($"Время чтения миллиона объектов: {stopwatch.ElapsedMilliseconds} мс");
+    }
