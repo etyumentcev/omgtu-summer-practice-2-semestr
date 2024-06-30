@@ -45,87 +45,145 @@ using System.Collections.Generic;
 using System.Diagnostics;
 using System.Threading;
 using System.Threading.Tasks;
-const int Million = 1000000;
-MeasurePerformance("BlockingCollection", RunBlockingCollection);
 
-MeasurePerformance("ConcurrentQueue", RunConcurrentQueue);
-        
-MeasurePerformance("Непотокобезопасный Queue", RunNonThreadSafeQueue);
-    static void MeasurePerformance(string collectionName, Action action)
+// Тест для BlockingCollection
+(int, int, int) TestBlockingCollection()
+{
+    var collection = new BlockingCollection<int>();
+    var readyToStart = new ManualResetEvent(false);
+    var swTotal = new Stopwatch();
+    var swEnqueue = new Stopwatch();
+    var swDequeue = new Stopwatch();
+
+    Thread producer = new Thread(() =>
     {
-        Console.WriteLine($"--- {collectionName} ---");
+        readyToStart.WaitOne();
+        swEnqueue.Start();
+        for (int i = 0; i < 1000000; i++) { collection.Add(i); }
+        swEnqueue.Stop();
+        collection.CompleteAdding();
+    });
 
-        for (int i = 0; i < 10; i++)
+    Thread consumer = new Thread(() =>
+    {
+        readyToStart.WaitOne();
+        swDequeue.Start();
+        while (!collection.IsCompleted)
         {
-            var stopwatch = Stopwatch.StartNew();
-            action();
-            stopwatch.Stop();
-
-            Console.WriteLine($"Замер {i + 1}: {stopwatch.ElapsedMilliseconds} мс");
+            if (collection.TryTake(out _)) { }
         }
+        swDequeue.Stop();
+    });
 
-        Console.WriteLine();
-    }
+    producer.Start();
+    consumer.Start();
+    readyToStart.Set();
+    swTotal.Start();
 
-    static void RunBlockingCollection()
+    producer.Join();
+    consumer.Join();
+    swTotal.Stop();
+
+    return ((int)swTotal.ElapsedMilliseconds, (int)swEnqueue.ElapsedMilliseconds, (int)swDequeue.ElapsedMilliseconds);
+}
+
+// Тест для ConcurrentQueue
+(int, int, int) TestConcurrentQueue()
+{
+    var queue = new ConcurrentQueue<int>();
+    var readyToStart = new ManualResetEvent(false);
+    var swTotal = new Stopwatch();
+    var swEnqueue = new Stopwatch();
+    var swDequeue = new Stopwatch();
+
+    Thread producer = new Thread(() =>
     {
-        var queue = new BlockingCollection<int>();
-        
-        var producerTask = Task.Run(() =>
-        {
-            for (int i = 0; i < Million; i++)
-            {
-                queue.Add(i);
-            }
-        });
+        readyToStart.WaitOne();
+        swEnqueue.Start();
+        for (int i = 0; i < 1000000; i++) { queue.Enqueue(i); }
+        swEnqueue.Stop();
+    });
 
-        var consumerTask = Task.Run(() =>
-        {
-            for (int i = 0; i < Million; i++)
-            {
-                queue.Take();
-            }
-        });
-
-        Task.WaitAll(producerTask, consumerTask);
-    }
-
-    static void RunConcurrentQueue()
+    Thread consumer = new Thread(() =>
     {
-        var queue = new ConcurrentQueue<int>();
-
-        var producerTask = Task.Run(() =>
+        readyToStart.WaitOne();
+        int result;
+        swDequeue.Start();
+        for (int i = 0; i < 1000000; i++)
         {
-            for (int i = 0; i < Million; i++)
-            {
-                queue.Enqueue(i);
-            }
-        });
-
-        var consumerTask = Task.Run(() =>
-        {
-            for (int i = 0; i < Million; i++)
-            {
-                int value;
-                queue.TryDequeue(out value);
-            }
-        });
-
-        Task.WaitAll(producerTask, consumerTask);
-    }
-
-    static void RunNonThreadSafeQueue()
-    {
-        var queue = new Queue<int>();
-        for (int i = 0; i < Million;i++)
-        {
-            queue.Enqueue(i);
+            while (!queue.TryDequeue(out result)) { }
         }
-        for (int i = 0; i < Million; i++)
-        {
-            queue.Dequeue();
-        }
+        swDequeue.Stop();
+    });
+
+    producer.Start();
+    consumer.Start();
+    readyToStart.Set();
+    swTotal.Start();
+
+    producer.Join();
+    consumer.Join();
+    swTotal.Stop();
+
+    return ((int)swTotal.ElapsedMilliseconds, (int)swEnqueue.ElapsedMilliseconds, (int)swDequeue.ElapsedMilliseconds);
+}
+
+// Тест для обычной очереди
+(int, int, int) TestQueue()
+{
+    var queue = new Queue<int>();
+    var swTotal = new Stopwatch();
+    var swEnqueue = new Stopwatch();
+    var swDequeue = new Stopwatch();
+
+    swTotal.Start();
+    swEnqueue.Start();
+    for (int i = 0; i < 1000000; i++) { queue.Enqueue(i); }
+    swEnqueue.Stop();
+    swDequeue.Start();
+    for (int i = 0; i < 1000000; i++) { queue.Dequeue(); }
+    swDequeue.Stop();
+    swTotal.Stop();
+
+    return ((int)swTotal.ElapsedMilliseconds, (int)swEnqueue.ElapsedMilliseconds, (int)swDequeue.ElapsedMilliseconds);
+}
+
+// Cбор результатов
+(int[], int[]) Start(Func<(int, int, int)> testMethod, int iterations)
+{
+    int[] res = new int[iterations];
+    int[] ite = new int[iterations];
+    for (int i = 1; i < iterations + 1; i++)
+    {
+        (int total, int enqueue, int dequeue) = testMethod();
+        res[i - 1] = total; // Записываем общее время
+        ite[i - 1] = i; // Записываем номер итерации
     }
+    return (ite, res);
+}
+
+#!csharp
+
+#r "nuget:ScottPlot, 5.0.35"
+
+using Microsoft.DotNet.Interactive.Formatting;
+using System.Linq;
+
+Formatter.Register(typeof(ScottPlot.Plot), (p, w) => 
+    w.Write(((ScottPlot.Plot)p).GetImageHtml(1200, 400)), HtmlFormatter.MimeType);
+
+(int[] dataX1,int[] dataY1) = Start(TestBlockingCollection, 10);
+(int[] dataX2,int[] dataY2) = Start(TestConcurrentQueue, 10);
+(int[] dataX3,int[] dataY3) = Start(TestQueue, 10);
+
+ScottPlot.Plot plt = new();
+plt.Add.Scatter(dataX1, dataY1);
+plt.Add.Scatter(dataX2, dataY2);
+plt.Add.Scatter(dataX3, dataY3);
+
+Console.WriteLine($"BlockingCollection: {dataYA.Average()}\nConcurrentQueue: {dataYB.Average()}\nНепотокобезопасные: {dataYC.Average()}");
+
+plt
 
 #!markdown
 
