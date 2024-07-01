@@ -1,0 +1,225 @@
+#!meta
+
+{"kernelInfo":{"defaultKernelName":"csharp","items":[{"aliases":[],"name":"csharp"}]}}
+
+#!markdown
+
+# Практическая работа №6. Изучение производительности потоко-безопасных очередей.
+
+**Цель:** Определить лучшую потоко-безопасную коллекцию для выполнения интенсивной обработки входящих сообщений.
+
+**Результаты:** После выполнения работы Вы сможете:
+1. Назвать оптимальную коллекцию для обработки большого количества сообщений.
+2. Изучите примтив синхронизации Условная переманная.
+
+
+**Материалы для самостоятельного изучения**.
+1. [Потоко-безопасные коллекции](https://learn.microsoft.com/en-us/dotnet/standard/collections/thread-safe/)
+2. Условные переменные Глава 5 п.5.1. книги Г. Эндрюс Основы многопоточного, параллельного и распределенного программирования
+3. [Одна из реализаций условных переменных на .Net](https://learn.microsoft.com/ru-ru/dotnet/api/system.threading.manualresetevent?view=net-8.0)
+
+## Задание.
+Исслдеовать производительность BlockingCollection и ConcurrentQueue в сравнении с непотокоабезопасной очередью.
+
+Для каждой потоко-безопасной очереди необходимо реализовать 2 потока: один записывает объект в очередь, а другой - читает объект из очереди.
+Для непотокобезопасной очереди реализовать два цикла - записи миллиона объектов в очередь и чтение миллиона объектов из очереди.
+
+Необходимо определить два промежутка времени:
+- время за которое поток или цикл обработает миллион объектов
+- время, необходимое на запись и чтение миллиона объектов из очреди.
+
+Сделать десять замеров по каждой коллекции. Все замеры показать на графике.
+
+Записать в ноутбуке вывод - какая и потоко-безопасных коллекций эффективнее. И выразить в процентах - скорость самой быстрой поток-безопасной коллекции по сравнению с обычной очредью.
+
+**Указание**.
+1. Необходимо исключить из замеров время, необходимое для запуска и остановки потоков, то есть посчитать чистое время, необходимое для обработки объектов.
+Для этого следует использовать условные события, которые позволят убедиться, что оба потока запустились и готовы читать и писать объекты и только потом запускать таймер.
+2. Для итогового вывода сравнивать усредненные значения.
+
+#!csharp
+
+#r "nuget:ScottPlot, 5.0.35"
+
+using System;
+using System.Collections.Concurrent;
+using System.Collections.Generic;
+using System.Diagnostics;
+using System.Linq;
+using System.Threading;
+using ScottPlot;
+using Microsoft.DotNet.Interactive.Formatting;
+
+Formatter.Register<Plot>((plot, writer) => writer.Write(plot.GetImageHtml(600, 800)), HtmlFormatter.MimeType);
+
+#!markdown
+
+## Измерение времени работы непотокобезопасной очереди
+
+#!csharp
+
+var nonThreadSafeTimings = new List<long>();
+var stopwatch = new Stopwatch();
+
+for (int iteration = 0; iteration < 10; iteration++)
+{
+    var queue = new Queue<int>();
+    stopwatch.Restart();
+
+    for (int i = 0; i < 1000000; i++)
+    {
+        if (i >= 0)
+        {
+            queue.Enqueue(i);
+        }
+    }
+    while (queue.Count > 0)
+    {
+        if (queue.Peek() >= 0)
+        {
+            queue.Dequeue();
+        }
+    }
+
+    stopwatch.Stop();
+    nonThreadSafeTimings.Add(stopwatch.ElapsedTicks);
+}
+
+// Вывод среднего и минимального времени в тиках
+Console.WriteLine($"Непотокобезопасная очередь: Среднее время = {nonThreadSafeTimings.Average()}, Минимальное время = {nonThreadSafeTimings.Min()}");
+
+var plt1 = new Plot();
+plt1.Add.Scatter(Enumerable.Range(1, 10).Select(x => (double)x).ToArray(), nonThreadSafeTimings.Select(x => (double)x).ToArray());
+plt1.Title("Производительность непотокобезопасной очереди");
+
+plt1
+
+#!markdown
+
+## Измерение времени работы ConcurrentQueue
+
+#!csharp
+
+var concurrentQueueTimings = new List<long>();
+var concurrentStopwatch = new Stopwatch();
+var concurrentEvent = new ManualResetEvent(false);
+
+for (int iteration = 0; iteration < 10; iteration++)
+{
+    var concurrentQueue = new ConcurrentQueue<int>();
+    var writerFinished = new ManualResetEvent(false);
+
+    var writerThread = new Thread(() =>
+    {
+        concurrentEvent.WaitOne();
+        for (int i = 0; i < 1_000_000; i++)
+        {
+            concurrentQueue.Enqueue(i);
+        }
+        writerFinished.Set();
+    });
+
+    var readerThread = new Thread(() =>
+    {
+        concurrentEvent.WaitOne();
+        while (true)
+        {
+            while (concurrentQueue.TryDequeue(out _))
+            {
+                // Чтение из очереди
+            }
+            if (writerFinished.WaitOne(0) && concurrentQueue.IsEmpty)
+                break;
+        }
+    });
+
+    concurrentEvent.Reset();
+    writerThread.Start();
+    readerThread.Start();
+
+    concurrentStopwatch.Start();
+    concurrentEvent.Set();
+
+    writerThread.Join();
+    readerThread.Join();
+    concurrentStopwatch.Stop();
+
+    concurrentQueueTimings.Add(concurrentStopwatch.ElapsedTicks);
+    concurrentStopwatch.Reset();
+}
+
+// Вывод среднего и минимального времени
+Console.WriteLine($"ConcurrentQueue: Среднее время = {concurrentQueueTimings.Average()}, Минимальное время = {concurrentQueueTimings.Min()}");
+
+var plt2 = new Plot();
+plt2.Add.Scatter(Enumerable.Range(1, 10).Select(x => (double)x).ToArray(), concurrentQueueTimings.Select(x => (double)x).ToArray());
+plt2.Title("Производительность ConcurrentQueue");
+
+plt2
+
+#!markdown
+
+## Измерение времени работы BlockingCollection
+
+#!csharp
+
+var blockingQueueTimings = new List<long>();
+var blockingStopwatch = new Stopwatch();
+var blockingEvent = new ManualResetEvent(false);
+
+for (int iteration = 0; iteration < 10; iteration++)
+{
+    var blockingCollection = new BlockingCollection<int>();
+    var threads = new List<Thread>();
+
+    var writerThread = new Thread(() =>
+    {
+        blockingEvent.WaitOne();
+        blockingStopwatch.Start();
+        for (int i = 0; i < 1000000; i++)
+        {
+            blockingCollection.Add(i);
+        }
+        blockingCollection.CompleteAdding();
+    });
+    threads.Add(writerThread);
+
+    var readerThread = new Thread(() =>
+    {
+        blockingEvent.Set();
+        foreach (var item in blockingCollection.GetConsumingEnumerable()) { }
+        blockingStopwatch.Stop();
+    });
+    threads.Add(readerThread);
+
+    threads.ForEach(t => t.Start());
+    threads.ForEach(t => t.Join());
+
+    blockingQueueTimings.Add(blockingStopwatch.ElapsedTicks);
+    blockingStopwatch.Reset();
+    blockingEvent.Reset();
+}
+
+Console.WriteLine($"BlockingCollection: Среднее время = {blockingQueueTimings.Average()}, Минимальное время = {blockingQueueTimings.Min()}");
+
+var plt3 = new Plot();
+plt3.Add.Scatter(Enumerable.Range(1, 10).Select(x => (double)x).ToArray(), blockingQueueTimings.Select(x => (double)x).ToArray());
+plt3.Title("Производительность BlockingCollection");
+
+plt3
+
+#!markdown
+
+## Вывод
+
+Непотокобезопасная очередь: Среднее время = 228518.4, Минимальное время = 171311
+
+ConcurrentQueue: Среднее время = 137062.7, Минимальное время = 125382
+
+BlockingCollection: Среднее время = 1356828.3, Минимальное время = 1128226
+
+Время указано в тиках
+
+Самая эффективная очередь ConcurrentQueue.
+
+Скорость ConcurrentQueue в сравнении с непотокобезопасной очереди(По средним значениям): 40.02%
