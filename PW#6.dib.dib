@@ -46,26 +46,29 @@ using System.Diagnostics;
 using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.DotNet.Interactive.Formatting;
+using ScottPlot;
 
 // Тест для BlockingCollection
 (int, int, int) TestBlockingCollection()
 {
     var collection = new BlockingCollection<int>();
+    var readyToStart = new ManualResetEvent(false);
     var swTotal = new Stopwatch();
     var swEnqueue = new Stopwatch();
     var swDequeue = new Stopwatch();
 
-    // Запускаем задачи для производителя и потребителя
-    Task producerTask = Task.Run(() =>
+    Thread producer = new Thread(() =>
     {
+        readyToStart.WaitOne();
         swEnqueue.Start();
         for (int i = 0; i < 1000000; i++) { collection.Add(i); }
         swEnqueue.Stop();
         collection.CompleteAdding();
     });
 
-    Task consumerTask = Task.Run(() =>
+    Thread consumer = new Thread(() =>
     {
+        readyToStart.WaitOne();
         swDequeue.Start();
         while (!collection.IsCompleted)
         {
@@ -74,9 +77,13 @@ using Microsoft.DotNet.Interactive.Formatting;
         swDequeue.Stop();
     });
 
-    // Запускаем общий таймер и ждем завершения задач
+    producer.Start();
+    consumer.Start();
+    readyToStart.Set();
     swTotal.Start();
-    Task.WaitAll(producerTask, consumerTask);
+
+    producer.Join();
+    consumer.Join();
     swTotal.Stop();
 
     return ((int)swTotal.ElapsedMilliseconds, (int)swEnqueue.ElapsedMilliseconds, (int)swDequeue.ElapsedMilliseconds);
@@ -86,22 +93,24 @@ using Microsoft.DotNet.Interactive.Formatting;
 (int, int, int) TestConcurrentQueue()
 {
     var queue = new ConcurrentQueue<int>();
+    var readyToStart = new ManualResetEvent(false);
     var swTotal = new Stopwatch();
     var swEnqueue = new Stopwatch();
     var swDequeue = new Stopwatch();
 
-    // Запускаем задачи для производителя и потребителя
-    Task producerTask = Task.Run(() =>
+    Thread producer = new Thread(() =>
     {
+        readyToStart.WaitOne();
         swEnqueue.Start();
         for (int i = 0; i < 1000000; i++) { queue.Enqueue(i); }
         swEnqueue.Stop();
     });
 
-    Task consumerTask = Task.Run(() =>
+    Thread consumer = new Thread(() =>
     {
-        swDequeue.Start();
+        readyToStart.WaitOne();
         int result;
+        swDequeue.Start();
         for (int i = 0; i < 1000000; i++)
         {
             while (!queue.TryDequeue(out result)) { }
@@ -109,9 +118,13 @@ using Microsoft.DotNet.Interactive.Formatting;
         swDequeue.Stop();
     });
 
-    // Запускаем общий таймер и ждем завершения задач
+    producer.Start();
+    consumer.Start();
+    readyToStart.Set();
     swTotal.Start();
-    Task.WaitAll(producerTask, consumerTask);
+
+    producer.Join();
+    consumer.Join();
     swTotal.Stop();
 
     return ((int)swTotal.ElapsedMilliseconds, (int)swEnqueue.ElapsedMilliseconds, (int)swDequeue.ElapsedMilliseconds);
