@@ -37,10 +37,217 @@
 Для этого следует использовать условные события, которые позволят убедиться, что оба потока запустились и готовы читать и писать объекты и только потом запускать таймер.
 2. Для итогового вывода сравнивать усредненные значения.
 
-#!markdown
+#!csharp
 
-// здесь писать код
+//#r "nuget:ScottPlot, 5.0.*"
+
+// Setup a custom formatter to display plots as images
+using Microsoft.DotNet.Interactive.Formatting;
+Formatter.Register(typeof(ScottPlot.Plot), (p, w) => 
+    w.Write(((ScottPlot.Plot)p).GetImageHtml(400, 300)), HtmlFormatter.MimeType);
+
+#!csharp
+
+using System;
+using System.Collections.Concurrent;
+using System.Collections.Generic;
+using System.Diagnostics;
+using System.Threading;
+using ScottPlot;
+
+const int ItemCount = 1000000;
+const int TestCount = 10;
+
+var measuresBlockingCollection = MeasureBlockingCollection(TestCount);
+var measuresConcurrentQueue = MeasureConcurrentQueue(TestCount);
+var measuresQueue = MeasureQueue(TestCount);
+
+List<double> MeasureBlockingCollection(int TestCount)
+{
+    List<double> times = new List<double>();
+    for (int i = 0; i < TestCount; i++)
+    {
+        double producerTime = 0;
+        double consumerTime = 0;
+        BlockingCollection<int> blockColl = new BlockingCollection<int>();
+
+        // Using Task.Run for producer and consumer
+        Task producerTask = Task.Run(() =>
+        {
+            var stopwatch = Stopwatch.StartNew();
+            for (int j = 0; j < ItemCount; j++)
+            {
+                blockColl.Add(j);
+            }
+            stopwatch.Stop();
+            producerTime = stopwatch.Elapsed.TotalMilliseconds;
+        });
+
+        Task consumerTask = Task.Run(() =>
+        {
+            var stopwatch = Stopwatch.StartNew();
+            for (int j = 0; j < ItemCount; j++)
+            {
+                blockColl.Take();
+            }
+            stopwatch.Stop();
+            consumerTime = stopwatch.Elapsed.TotalMilliseconds;
+        });
+
+        Task.WaitAll(producerTask, consumerTask);
+
+        times.Add(producerTime + consumerTime);
+    }
+    return times;
+}
+
+public List<double> MeasureConcurrentQueue(int TestCount)
+{
+        var times = new List<double>();
+
+        for (int i = 0; i < TestCount; i++)
+        {
+            double producerTime = 0;
+            double consumerTime = 0;
+            var queue = new ConcurrentQueue<int>();
+
+            // Использование Task.Run для создания задач для производителя и потребителя
+            Task producerTask = Task.Run(() =>
+            {
+                var stopwatch = Stopwatch.StartNew();
+                for (int j = 0; j < ItemCount; j++)
+                {
+                    queue.Enqueue(j);
+                }
+                stopwatch.Stop();
+                producerTime = stopwatch.Elapsed.TotalMilliseconds;
+            });
+
+            Task consumerTask = Task.Run(() =>
+            {
+                var stopwatch = Stopwatch.StartNew();
+                for (int j = 0; j < ItemCount; j++)
+                {
+                    queue.TryDequeue(out int item);
+                }
+                stopwatch.Stop();
+                consumerTime = stopwatch.Elapsed.TotalMilliseconds;
+            });
+
+            // Ожидание завершения задач производителя и потребителя
+            Task.WaitAll(producerTask, consumerTask);
+
+            times.Add(producerTime + consumerTime);
+        }
+
+        return times;
+    }
+
+List<double> MeasureQueue(int TestCount)
+{
+    var times = new List<double>();
+
+    for (int i = 0; i < TestCount; i++)
+    {
+        var queue = new Queue<int>();
+        
+        var writeStopwatch = Stopwatch.StartNew();
+        for (int j = 0; j < ItemCount; j++) 
+        {
+            queue.Enqueue(j);
+        }
+        writeStopwatch.Stop();
+        var writeTime = writeStopwatch.Elapsed.TotalMilliseconds;
+
+        var readStopwatch = Stopwatch.StartNew();
+        for (int j = 0; j < ItemCount; j++)
+        {
+            int result = queue.Dequeue();
+        }
+        readStopwatch.Stop();
+        var readTime = writeStopwatch.Elapsed.TotalMilliseconds;
+
+        times.Add(writeTime + readTime);
+    }
+
+    return times;
+}
+
+
+int[] dataX = Enumerable.Range(0, TestCount).ToArray<int>();
+var dataY = measuresBlockingCollection.Select(r => r).ToArray();
+var blockingCollectionTimes = MeasureBlockingCollection(TestCount);
+
+ScottPlot.Plot plt = new();
+plt.Add.Scatter(dataX, dataY);
+plt.XLabel("Measurement number");
+plt.YLabel("Time in ms");
+plt.Title($"Results BlockingCollection");
+plt
+
+#!csharp
+
+
+int[] dataX = Enumerable.Range(0, TestCount).ToArray<int>();
+var dataY = measuresConcurrentQueue.Select(r => r).ToArray();
+var concurrentQueueTimes = MeasureConcurrentQueue(TestCount);
+ScottPlot.Plot plt = new();
+plt.Add.Scatter(dataX, dataY);
+plt.XLabel("Measurement number");
+plt.YLabel("Time in ms");
+plt.Title($"Results ConcurrentQueue");
+plt
+
+#!csharp
+
+int[] dataX = Enumerable.Range(0, TestCount).ToArray<int>();
+var dataY = measuresQueue.Select(r => r).ToArray();
+var nonThreadSafeQueueTimes = MeasureQueue(TestCount);
+ScottPlot.Plot plt = new();
+plt.Add.Scatter(dataX, dataY);
+plt.XLabel("Measurement number");
+plt.YLabel("Time in ms");
+plt.Title($"Results Queue");
+plt
+
+#!csharp
+
+var blockingCollectionAverageTime = blockingCollectionTimes;
+var concurrentQueueAverageTime = concurrentQueueTimes;
+var nonThreadSafeQueueAverageTime = nonThreadSafeQueueTimes;
+
+double blockCollAvg = blockingCollectionTimes.Average();
+double concQueueAvg = concurrentQueueTimes.Average();
+double queueAvg = nonThreadSafeQueueTimes.Average();
+
+string mostEfficientCollection;
+double fastestThreadSafeAvgTime;
+
+if (concQueueAvg < blockCollAvg)
+{
+    mostEfficientCollection = "ConcurrentQueue";
+    fastestThreadSafeAvgTime = concQueueAvg;
+}
+else
+{
+    mostEfficientCollection = "BlockingCollection";
+    fastestThreadSafeAvgTime = blockCollAvg;
+}
+
+double percentDiff = (queueAvg - fastestThreadSafeAvgTime) / queueAvg * 100;
+
+//вывод результатов
+Console.WriteLine($"Среднее время для BlockingCollection: {blockCollAvg} ms");
+Console.WriteLine($"Среднее время для ConcurrentQueue: {concQueueAvg} ms");
+Console.WriteLine($"Среднее время для Queue: {queueAvg} ms");
+Console.WriteLine($"Наиболее эффективная потоко-безопасная коллекция: {mostEfficientCollection}");
+Console.WriteLine($"Скорость {mostEfficientCollection} относительно Queue: {percentDiff:F1}%");
 
 #!markdown
 
 ## Вывод
+
+#!markdown
+
+Наиболее эффективная потоко-безопасная коллекция: ConcurrentQueue
+Скорость ConcurrentQueue относительно Queue: -34.1%
