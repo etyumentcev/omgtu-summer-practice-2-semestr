@@ -4,7 +4,7 @@
 
 #!markdown
 
-# Практическая работа №1. Знакомство с потоками.
+# Практическая работа №3. Знакомство с потоками.
 
 **Цель:** Познакомиться с возможностями класса System.Thread платформы .NET Framework.
 
@@ -87,3 +87,217 @@ Assert.Equal(0, DefiniteIntegral.Solve(-1, 1, X, 1e-4, 2), 1e-4);
 Assert.Equal(0, DefiniteIntegral.Solve(-1, 1, SIN, 1e-5, 8), 1e-4);
 
 Assert.Equal(50, DefiniteIntegral.Solve(0, 10, X, 1e-6, 8), 1e-5);
+
+#!markdown
+
+# Практическая работа №4.
+### Вычисление определенного интеграла функции sin(x) на отрезке [-100, 100] с использованием многопоточности
+
+В этой работе будем использовать функцию `DefiniteIntegral.Solve` для вычисления определенного интеграла функции ( sin(x) ) на отрезке [-100, 100] с использованием многопоточности. Мы будем применять тот же подход, что и в предыдущей практической работе, чтобы распределить вычисления между несколькими потоками.
+
+Пример:
+
+#!csharp
+
+var SIN = (double x) => Math.Sin(x);
+DefiniteIntegral.Solve(-100, 100, SIN, 1e-5, 10)
+
+#!markdown
+
+### Задание: Определение минимального размера шага для оптимальной производительности
+Для выполнения данного задания необходимо определить минимальный размер шага, обеспечивающий оптимальную производительность с точностью до 1e-4. Размеры шага, которые необходимо проверить: 1e-1, 1e-2, 1e-3, 1e-4, 1e-5, 1e-6.
+
+Для решения этой задачи напишем метод, который будет вычислять время выполнения вычисления интеграла. Этот метод позволит нам определить, какой шаг обеспечивает оптимальную производительность.
+
+#!csharp
+
+using System.Diagnostics;
+double TimeMeasurement (double a, double b, Func<double, double> function, double step, int threadsNumber)
+{
+    Stopwatch stopWatch = new Stopwatch();
+    stopWatch.Start();//запускаем таймер
+    DefiniteIntegral.Solve(a, b, function, step, threadsNumber);
+    stopWatch.Stop();//останавливаем таймер
+    return stopWatch.ElapsedMilliseconds;//возвращаем время в млсекундаха что бы имерения были максимальны точны
+}
+
+#!markdown
+
+###  Задача на определение минимального шага
+
+Рассмотрим, как перейти от описания задачи к конкретной реализации кода. Мы будем использовать библиотеку `xunit` для тестирования точности вычислений.
+
+1. Подключим библиотеку `xunit` для тестов и определим функцию синуса, которую будем интегрировать.
+
+   ```csharp
+   #r "nuget: xunit, 2.8.1"
+   var SIN = (double x) => Math.Sin(x);
+
+2. Создадим массив шагов, которые будем тестировать, и переменные для хранения минимального времени выполнения и соответствующего шага.
+
+   ```csharp
+   double[] steps = { 1e-1, 1e-2, 1e-3, 1e-4, 1e-5, 1e-6 };
+   double goodStep = 1e-1, minTime = double.MaxValue;
+
+3. Используем цикл для перебора всех шагов, вычисляем интеграл и время выполнения для каждого шага.
+   
+   ```csharp
+   foreach (var step in steps)
+   {
+      double answer = DefiniteIntegral.Solve(-100, 100, SIN, step, 10);
+      double timeMeasurement = TimeMeasurement(-100, 100, SIN, step, 10);
+
+4. Проверим, соответствует ли результат заданной точности, и если да, обновим минимальное время выполнения и запишим соответствующий шаг для этого времени.
+
+   ```csharp
+    try
+    {
+        Assert.Equal(0, answer, 1e-4);
+
+        if (timeMeasurement < minTime)
+        {
+            minTime = timeMeasurement;
+            goodStep = step;
+        }
+
+        Console.WriteLine($"Шаг {step} | Время выполнения {timeMeasurement} млсек | Результат {answer}");
+    }
+    catch (Exception)
+    {
+        Console.WriteLine($"Шаг {step} | Время выполнения {timeMeasurement} млсек | Результат не точный");
+    }
+
+5. Вывод подходящего шага
+
+   ```csharp
+   Console.WriteLine($"Подходящий шаг {goodStep} завершил выполнение с наименьшим значением в {minTime} млсек");
+
+### Полный код:
+
+#!csharp
+
+#r "nuget: xunit, 2.8.1"
+var SIN = (double x) => Math.Sin(x);
+
+double[] steps = { 1e-1, 1e-2, 1e-3, 1e-4, 1e-5, 1e-6 };
+double goodStep = 1e-1, minTime = double.MaxValue;
+
+foreach (var step in steps)
+{
+    double answer = DefiniteIntegral.Solve(-100, 100, SIN, step, 10);
+    double timeMeasurement = TimeMeasurement(-100, 100, SIN, step, 10);
+
+    try
+    {
+        Assert.Equal(0, answer, 1e-4);
+
+        if (timeMeasurement < minTime)
+        {
+            minTime = timeMeasurement;
+            goodStep = step;
+        }
+
+        Console.WriteLine($"Шаг {step} | Время выполнения {timeMeasurement} млсек | Результат {answer}");
+    }
+    catch (Exception)
+    {
+        Console.WriteLine($"Шаг {step} | Время выполнения {timeMeasurement} млсек | Результат не точный");
+    }
+}
+Console.WriteLine($"Подходящий шаг {goodStep} завершил выполнение с наименьшим значением в {minTime} млсек");
+
+#!markdown
+
+Мы выяснили, что шаг 1e-4 оказался оптимальным для решения данной задачи. Перейдем дальше.
+
+### Задание: Подбор оптимального числа потоков
+
+Для шага, определенного в предыдущем пункте, подобрать оптимальное число потоков, при котором достигается минимальное время выполнения функции `Solve`. Заполнение данных для построения графиков выполняется программно.
+
+Результаты представить в виде графика: по оси OX - время вычисления функции `Solve`, а по оси OY - количество потоков. Отдельно вывести оптимальный результат.
+
+#!csharp
+
+#r "nuget:ScottPlot, 5.0.36"
+using Microsoft.DotNet.Interactive.Formatting;
+Formatter.Register(typeof(ScottPlot.Plot), (p, w) => 
+    w.Write(((ScottPlot.Plot)p).GetImageHtml(500, 500)), HtmlFormatter.MimeType);
+
+int countThreads = 20;
+double[] timeThreads = new double[countThreads];
+
+for (int threads=1; threads<=countThreads; threads++)
+{
+    double timeMeasurement = 0;
+
+    for (int i = 0; i < 20; i++) timeMeasurement += TimeMeasurement(-100, 100, SIN, goodStep, threads);
+
+    timeThreads[threads-1] = timeMeasurement / 20;
+}
+
+int normalIndex = 0;
+for (int i= 0; i < 20; i++)
+{
+    if (timeThreads[i] < timeThreads[normalIndex]) normalIndex = i;
+}
+Console.WriteLine($"Оптимальное кол-во потоков: {normalIndex+1} со сред временем {timeThreads[normalIndex ]} млсек");
+
+double[] dataY = new double[countThreads];
+for (int i =1; i <= 20; i++) dataY[i-1] = i;
+ScottPlot.Plot plt = new();
+
+plt.YLabel("Потоки");
+plt.XLabel("млсек");
+
+plt.Add.Scatter(timeThreads, dataY);
+plt
+
+#!markdown
+
+### Задание: Сравнение многопоточной и однопоточной реализаций
+
+Для шага, определенного в предыдущем пункте, подобрать оптимальное число потоков, при котором достигается минимальное время выполнения функции `Solve`. Затем сравнить лучший результат, полученный на этом шаге, с однопоточной реализацией. 
+
+#!csharp
+
+double SolveSingl(double a, double b, Func<double, double> function, double step)
+{
+    double answer = 0.0;
+    for (int i =0; i < Convert.ToInt32((b-a) / step); i++) answer += step * function(a+i *step);
+
+    return answer;
+}
+
+#!csharp
+
+double TimeMeasurementSingl(double a, double b, Func<double, double> function, double step)
+{
+    Stopwatch stopWatch = new Stopwatch();
+    stopWatch.Start();
+    SolveSingl(a, b, function, step);
+    stopWatch.Stop();
+    return stopWatch.ElapsedMilliseconds;
+}
+
+#!csharp
+
+double singleThreadedTime = 0;
+for (int i = 0; i < 20; i++) singleThreadedTime += TimeMeasurementSingl(-100, 100, SIN, goodStep);
+singleThreadedTime /= 20;
+Console.WriteLine($"Однопоточка решила за {singleThreadedTime} млсек");
+
+double percentTime = ((singleThreadedTime - timeThreads[normalIndex]) / singleThreadedTime) * 100;
+Console.WriteLine($"Многопоточная версия быстрее на {Math.Round(percentTime,2)}% по сравнению с однопоточной версией");
+
+#!markdown
+
+### Summary
+
+#!csharp
+
+Console.WriteLine("Summary:");
+Console.WriteLine($"Размер шага, выбранный в п.4: {goodStep} (в момент теста программы 0,0001)");
+Console.WriteLine($"Оптимальное количество потоков из п. 5: {normalIndex+1} (в момент теста программы 20)");
+Console.WriteLine($"Время работы однопоточной версии: {singleThreadedTime} млсек (в момент теста программы 32,5 млсек)");
+Console.WriteLine($"Время работы многопоточной версии: {timeThreads[normalIndex]} млсек при использовании {normalIndex+1} потоков (в момент теста программы 6,4 млсек при 20)");
+Console.WriteLine($"Разница в скорости между многопоточной и однопоточной версиями: {Math.Round(percentTime,2)}% (в момент теста программы 80,31%)");
