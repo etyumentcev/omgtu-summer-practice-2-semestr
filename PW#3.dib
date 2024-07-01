@@ -32,28 +32,51 @@
 
 #!csharp
 
-//
+using System;
+using System.Threading;
+
 // Вычисление определенного интеграла
-//
 class DefiniteIntegral
 {
-    //
-    // a, b - границы отрезка, на котором происходит вычисление опредленного интеграла
-    // function - функция, для которой вычисляется определнный интеграл
+    // a, b - границы отрезка, на котором происходит вычисление определенного интеграла
+    // function - функция, для которой вычисляется определенный интеграл
     // step - размер одного шага разбиения
     // threadsNumber - число потоков, которые используются для вычислений
-    //
-    public static double Solve(double a, double b, Func<double, double> function, double step, int threadsnumber)
+    public static double Solve(double a, double b, Func<double, double> function, double step, int threadsNumber)
     {
-        // отсюда надо начинать реализацию задачи
-        return 0.0;
+        Barrier barrier = new Barrier(threadsNumber+1);//барьер для ВСЕХ потоков *синхронизация
+
+        int countSegments = Convert.ToInt32((b-a)/step);//переменная кол-во разбиений
+        double[] answersThreads = new double[threadsNumber]; //все решения потоков
+        double answer = 0.0; //переменная итогового результата
+
+        Thread[] threads = new Thread[threadsNumber];//создаем потоки
+        for (int i=0; i<threadsNumber; i++)
+        {
+            int indexThread = i;
+            threads[i] = new Thread(() => StartThread(indexThread));//выдаем задачу каждому потоку
+            threads[i].Start();//запуск потока
+        }
+
+        barrier.SignalAndWait();//ждем завершения всех потоков
+        for (int i = 0; i < threadsNumber; i++)answer += answersThreads[i];//суммируем все значения потоков
+        return answer;
+
+        void StartThread(int indexThread)//работа для потока
+        {
+            int start = (indexThread* countSegments)/threadsNumber;
+            int end = ((indexThread+1) *countSegments)/threadsNumber;
+            double resultThread = 0.0;
+            for (int i=start; i<end; i++) resultThread += step*function(a+ i*step);
+            answersThreads[indexThread] = resultThread;
+            barrier.SignalAndWait(); //уведомлялка что поток закончил свою работу
+        }
     }
 }
 
 #!csharp
 
 #r "nuget: xunit, 2.8.1"
-
 using Xunit;
 
 var X = (double x) => x;
@@ -63,4 +86,4 @@ Assert.Equal(0, DefiniteIntegral.Solve(-1, 1, X, 1e-4, 2), 1e-4);
 
 Assert.Equal(0, DefiniteIntegral.Solve(-1, 1, SIN, 1e-5, 8), 1e-4);
 
-Assert.Equal(10, DefiniteIntegral.Solve(0, 10, X, 1e-6, 8), 1e-5);
+Assert.Equal(50, DefiniteIntegral.Solve(0, 10, X, 1e-6, 8), 1e-5);
