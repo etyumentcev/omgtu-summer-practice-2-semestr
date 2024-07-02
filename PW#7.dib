@@ -22,6 +22,144 @@ public interface ICommand
     void Execute();
 }
 
+#!csharp
+
+using System;
+using System.Collections.Concurrent;
+using System.Threading;
+
+public interface ICommand
+{
+    void Execute();
+}
+
+public class ServerThread
+{
+    private readonly ConcurrentQueue<ICommand> commandQueue = new ConcurrentQueue<ICommand>();
+    private Thread runThread;
+    private volatile bool isRunning;
+
+    public Thread RunThread => runThread;
+
+    public ServerThread()
+    {
+        isRunning = true;
+        runThread = new Thread(Run);
+        runThread.Start();
+    }
+
+    //метод для добавления команды в очередь
+    public void AddCommand(ICommand command)
+    {
+        if (isRunning)
+        {
+            commandQueue.Enqueue(command);
+        }
+    }
+
+    //основной метод, выполняющий команды из очереди
+    private void Run()
+    {
+        while (isRunning || !commandQueue.IsEmpty)
+        {
+            if (commandQueue.TryDequeue(out ICommand command))
+            {
+                try
+                {
+                    command.Execute();
+                }
+                catch (Exception ex)
+                {
+                    Console.WriteLine($"Exception caught: {ex.Message}");
+                }
+            }
+        }
+    }
+
+    public void HardStop()
+    {
+        isRunning = false;
+        foreach (var remainingCommand in commandQueue)
+        {
+            try
+            {
+                remainingCommand.Execute();
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"Exception caught: {ex.Message}");
+            }
+        }
+        commandQueue.Clear();
+        runThread.Interrupt();
+    }
+
+    public void SoftStop()
+    {
+        isRunning = false;
+        foreach (var remainingCommand in commandQueue)
+        {
+            try
+            {
+                remainingCommand.Execute();
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"Exception caught: {ex.Message}");
+            }
+        }
+        commandQueue.Clear();
+    }
+
+    public void WaitForCompletion()
+    {
+        runThread.Join();
+    }
+}
+
+public class HardStopCommand : ICommand
+{
+    private readonly ServerThread serverThread;
+
+    public HardStopCommand(ServerThread serverThread)
+    {
+        this.serverThread = serverThread;
+    }
+
+    public void Execute()
+    {
+        if (Thread.CurrentThread != serverThread.RunThread)
+        {
+            throw new InvalidOperationException("Current thread does not match ServerThread thread");
+        }
+        serverThread.HardStop();
+    }
+}
+
+
+public class SoftStopCommand : ICommand
+{
+    private readonly ServerThread serverThread;
+
+    public SoftStopCommand(ServerThread serverThread)
+    {
+        this.serverThread = serverThread;
+    }
+
+    public void Execute()
+    {
+        if (Thread.CurrentThread != serverThread.RunThread)
+        {
+            throw new InvalidOperationException("Current thread does not match ServerThread thread");
+        }
+        serverThread.SoftStop();
+    }
+}
+#!csharp
+
+UnitTest.HardTest();
+UnitTest.SoftTest();
+
 #!markdown
 
 Классы, наследующие интерйес ICommand будем называть **Командами.**
