@@ -22,6 +22,150 @@ public interface ICommand
     void Execute();
 }
 
+#!csharp
+
+class MyCommand : ICommand
+{
+int id;
+public MyCommand(int id)
+{
+    this.id = id;
+}
+
+public void Execute()
+{
+    Console.WriteLine("Обработка комманды {0}",id);
+}
+}
+
+#!csharp
+
+using System.Threading;
+using System.Collections.Concurrent;
+public class ServerThread
+{
+    ConcurrentQueue<ICommand> commandQueue = new ConcurrentQueue<ICommand>();
+    bool Hard = false;
+    bool Soft = false;
+    Thread thread;
+
+    public ServerThread()
+    {
+        thread = new Thread(ExecuteCommands);
+        thread.Start();
+    }
+
+    public void AddCommand(ICommand command)
+    {
+        commandQueue.Enqueue(command);
+    }
+
+    public void ExecuteCommands()
+    {
+        while (true)
+        {
+            ICommand nextCommand;
+
+                if (commandQueue.Count > 0 && !Hard)
+                {
+                    commandQueue.TryDequeue(out nextCommand);
+                }
+                else
+                {
+                    if (Soft || Hard)
+                    {
+                        break;
+                    }
+                    else
+                    {
+                        continue;
+                    }
+                }
+
+            try
+            {
+                nextCommand.Execute();
+            }
+            catch (Exception ex)
+            {}
+        }
+    }
+
+    public void HardStop()
+    {
+        Hard = true;
+    }
+
+    public void SoftStop()
+    {
+         Soft = true;
+    }
+    public Thread GetThread() => thread;
+}
+
+#!csharp
+
+public class HardStop : ICommand
+{
+    ServerThread  Stop;
+    public HardStop(ServerThread thr)
+    {
+        Stop = thr;
+    }
+    public void Execute()
+    {
+        if (Thread.CurrentThread == Stop.GetThread())
+        Stop.HardStop();
+        Console.WriteLine("Обработка HardStop");
+    }
+}
+
+#!csharp
+
+public class SoftStop : ICommand
+{
+    ServerThread Stop;
+    
+    public SoftStop(ServerThread Stop)
+    {
+        this.Stop = Stop;
+    }
+    public void Execute()
+    {
+        if (Thread.CurrentThread == Stop.GetThread())
+        Stop.SoftStop();
+        Console.WriteLine("Обработка SoftStop");
+    }
+}
+
+#!csharp
+
+using System.Threading;
+ServerThread serverThread = new ServerThread();
+ServerThread serverThread2 = new ServerThread();
+
+for (int i=0;i<10;i++)
+{
+      serverThread.AddCommand(new MyCommand(i));
+      if (i==5)
+      serverThread.AddCommand(new SoftStop(serverThread));  
+}
+Thread.Sleep(1000);
+serverThread.AddCommand(new MyCommand(10));
+serverThread.GetThread().Join();
+Console.WriteLine("Сервер остановил свою работу SoftStop, когда обработал все комманды, что оставались в очереди от 0 до 9. Добавление новой, после обработки всей очереди невозможно.");
+
+
+for (int i=0;i<10;i++)
+{
+      serverThread2.AddCommand(new MyCommand(i));
+      if (i==5)
+      serverThread2.AddCommand(new HardStop(serverThread2));  
+}
+serverThread2.GetThread().Join();
+
+Console.WriteLine("Сервер остановлен HardStop");
+
 #!markdown
 
 Классы, наследующие интерйес ICommand будем называть **Командами.**
