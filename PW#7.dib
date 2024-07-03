@@ -24,7 +24,6 @@ public interface ICommand
 
 #!markdown
 
-Классы, наследующие интерйес ICommand будем называть **Командами.**
 
 Реализовать класс ServerThread и команды по hard и soft завершению потока. 
 
@@ -38,3 +37,200 @@ ServerThread может менять свое поведение для обра
 Отсутствие Команд в очереди потока не должно требовать значительных затрат процессорного времени. Значительными считаются затраты, которые зависят от времени простоя потока.
 
 Написать проверку, которая гарантирует правильное выполнение команд HardStop и SoftStop.
+
+#!csharp
+
+public interface ICommand
+{
+    void Execute();
+}
+
+#!csharp
+
+using System;
+using System.Collections.Concurrent;
+using System.Threading;
+
+public static bool softStopRequested = false;
+
+#!csharp
+
+public class HardStop : ICommand
+{
+    private readonly Thread _targetThread;
+
+    public HardStop(Thread targetThread)
+    {
+        _targetThread = targetThread ?? throw new ArgumentNullException(nameof(targetThread));
+    }
+
+    public void Execute()
+    {
+        if (!IsCurrentThreadTargetThread())
+        {
+            throw new InvalidOperationException("Команда HardStop не может быть выполнена в другом потоке");
+        }
+        StopThreadImmediately();
+    }
+
+    private bool IsCurrentThreadTargetThread()
+    {
+        return _targetThread == Thread.CurrentThread;
+    }
+
+    private void StopThreadImmediately()
+    {
+        _targetThread.Interrupt();
+    }
+}
+
+#!csharp
+
+public class SoftStop : ICommand
+{
+    private readonly BlockingCollection<ICommand> _commandQueue;
+    private readonly Thread _targetThread;
+
+    public SoftStop(BlockingCollection<ICommand> commandQueue, Thread targetThread)
+    {
+        _commandQueue = commandQueue ?? throw new ArgumentNullException(nameof(commandQueue));
+        _targetThread = targetThread ?? throw new ArgumentNullException(nameof(targetThread));
+    }
+
+    public void Execute()
+    {
+        if (!IsCurrentThreadTargetThread())
+        {
+            throw new InvalidOperationException("Команда SoftStop не может быть выполнена в другом потоке");
+        }
+
+        if (softStopRequested)
+        {
+            ExecutePendingCommands();
+        }
+    }
+
+    private bool IsCurrentThreadTargetThread()
+    {
+        return _targetThread == Thread.CurrentThread;
+    }
+
+    private void ExecutePendingCommands()
+    {
+        while (_commandQueue.Count > 0)
+        {
+            var command = GetNextCommand();
+            command.Execute();
+        }
+    }
+
+    private ICommand GetNextCommand()
+    {
+        return _commandQueue.Take();
+    }
+}
+
+#!csharp
+
+public static class ExceptionHandler
+{
+    public static void Handle(Exception exception, ICommand command)
+    {
+        Console.WriteLine("Исключение " + exception + " при выполнении команды: " + command.GetType().Name);
+    }
+}
+
+#!csharp
+
+public class ServerThread
+{
+    private readonly BlockingCollection<ICommand> _commandQueue = new BlockingCollection<ICommand>();
+    public Thread WorkerThread { get; private set; }
+
+    public ServerThread()
+    {
+        WorkerThread = new Thread(Run);
+        WorkerThread.Start();
+    }
+
+    private void Run()
+    {
+        while (!softStopRequested)
+        {
+            if (_commandQueue.TryTake(out ICommand command))
+            {
+                try
+                {
+                    if (command is SoftStop)
+                    {
+                        softStopRequested = true;
+                        ExecuteRemainingCommands();
+                        break;
+                    }
+                    else if (command is HardStop)
+                    {
+                        break;
+                    }
+                    command.Execute();
+                }
+                catch (Exception ex)
+                {
+                    ExceptionHandler.Handle(ex, command);
+                }
+            }
+            else
+            {
+                Thread.Sleep(50); 
+            }
+        }
+    }
+
+    private void ExecuteRemainingCommands()
+    {
+        while (_commandQueue.TryTake(out ICommand remainingCommand))
+        {
+            try
+            {
+                remainingCommand.Execute();
+            }
+            catch (Exception ex)
+            {
+                ExceptionHandler.Handle(ex, remainingCommand);
+            }
+        }
+    }
+
+    public void EnqueueCommand(ICommand command)
+    {
+        _commandQueue.Add(command);
+    }
+}
+
+#!csharp
+
+public class TestCommand : ICommand
+{
+    public void Execute()
+    {
+        Console.WriteLine("Сервер выполняет задачу...");
+    }
+}
+
+#!csharp
+
+ServerThread serverThread = new ServerThread();
+
+serverThread.EnqueueCommand(new TestCommand());
+serverThread.EnqueueCommand(new TestCommand());
+try
+{
+    ICommand stopCommand = new HardStop(serverThread.WorkerThread);
+    serverThread.EnqueueCommand(stopCommand);
+}
+catch (Exception ex)
+{
+    Console.WriteLine($"Ошибка: {ex.Message}");
+}
+serverThread.EnqueueCommand(new TestCommand());
+
+serverThread.WorkerThread.Join();
