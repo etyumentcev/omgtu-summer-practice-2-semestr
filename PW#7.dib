@@ -17,10 +17,190 @@
 
 #!csharp
 
+using System;
+using System.Collections.Concurrent;
+using System.Threading;
+
 public interface ICommand
 {
     void Execute();
 }
+public class ServerThread
+{
+    public Thread threadServerLogic { get; set; }
+    BlockingCollection<ICommand> queueServerCommands = new BlockingCollection<ICommand>();
+    ManualResetEvent flag = new ManualResetEvent(false);
+    ManualResetEvent hardStopFlag = new ManualResetEvent(false);
+    ManualResetEvent softStopFlag = new ManualResetEvent(false);
+
+    public ServerThread()
+    {
+        threadServerLogic = new Thread(RunServer);
+        threadServerLogic.Start();
+    }
+
+    public void RunServer()
+    {
+
+        while (true)
+        {
+
+            //ждем сигнал
+            flag.WaitOne();
+            flag.Reset();
+            
+            if (hardStopFlag.WaitOne(0)) //проверка на жесткую остановку
+                break;
+
+            foreach (var command in queueServerCommands.GetConsumingEnumerable())
+            //while (queueServerCommands.TryTake(out ICommand command) || hardStopFlag.WaitOne(0))
+            {
+                if (hardStopFlag.WaitOne(0))//проверка на жесткую остановку
+                    break;
+
+                try
+                {
+                    command.Execute();
+                }
+                catch (Exception ex)
+                {
+                    HandleException(command, ex);
+                }
+
+                if (hardStopFlag.WaitOne(0))//проверка на жесткую остановку после выполнения команды
+                    break;
+
+                if (softStopFlag.WaitOne(0) && queueServerCommands.Count == 0)//проверка на мягкую остановку
+                    break;
+            }
+
+            if (hardStopFlag.WaitOne(0))//проверка на жесткую остановку
+                    break;
+
+            if (softStopFlag.WaitOne(0) && queueServerCommands.Count == 0)//проверка на мягкую остановку
+                break;
+        }
+        Console.WriteLine("Поток сервера завершил свою работу.");
+    }
+
+    public void AddCommand(ICommand command)
+    {
+        if (!queueServerCommands.IsAddingCompleted)
+        {
+            queueServerCommands.Add(command);
+            Console.WriteLine($"Команда: {command.GetType().Name} добавлена в очередь");
+        }
+        else
+        {
+            Console.WriteLine($"Невозможно добавить команду: {command.GetType().Name} (очередь завершена)");
+        }
+        flag.Set();//cигнал для пробуждения потока
+    }
+
+    public void HardStopHelp()
+    {
+        hardStopFlag.Set(); //cигнал для немедленной остановки
+        flag.Set(); //чтобы завершить поток нужно его разбудить
+        queueServerCommands.CompleteAdding();//тк у нас поток выключается завершаем очередь
+    }
+
+    public void SoftStopHelp()
+    {
+        softStopFlag.Set(); // Сигнал для мягкой остановки
+        flag.Set(); // Пробуждение потока
+        queueServerCommands.CompleteAdding();//тк у нас поток выключается завершаем очередь
+        Console.WriteLine($"добавление в очередь прекращено");
+    }
+
+    public void HandleException(ICommand command, Exception ex)
+    {
+        Console.WriteLine($"Сработало исключение для комманды {command.GetType().Name} | {ex.Message}");
+    }
+
+}
+
+public class HardStop : ICommand
+{
+    public ServerThread serverThread { get; set; }
+
+    public void Execute()
+    {
+        if (Thread.CurrentThread == serverThread.threadServerLogic)
+        {
+            Console.WriteLine("ЖЕСТКАЯ ОСТАНОВКА!!!");
+            serverThread.HardStopHelp();
+        }
+        else
+            throw new InvalidOperationException("ERROR: HardStop может выполняться только потоком сервера");
+    }
+}
+
+public class SoftStop : ICommand
+{
+    public ServerThread serverThread { get; set; }
+
+    public void Execute()
+    {
+        if (Thread.CurrentThread == serverThread.threadServerLogic)
+        {
+            Console.WriteLine("НАЧАЛАСЬ ПЛАВНАЯ ОСТАНОВКА!!!");
+            serverThread.SoftStopHelp();
+        }
+        else
+            throw new InvalidOperationException("ERROR: SoftStop может выполняться только потоком сервера");
+    }
+}
+
+#!csharp
+
+public class Test1: ICommand
+{
+    public void Execute()
+    {
+        Thread.Sleep(180);
+        Console.WriteLine($"{122/2} = 61");
+    }
+}
+
+public class Test2: ICommand
+{
+    public void Execute()
+    {
+        Thread.Sleep(180);
+        Console.WriteLine($"{20/5} = 4");
+    }
+}
+
+#!csharp
+
+Console.WriteLine("Тест SoftStop");
+
+        ServerThread testServer = new ServerThread();
+
+        for (int i = 0; i < 3; i++)
+            testServer.AddCommand(new Test1());
+        testServer.AddCommand(new SoftStop{ serverThread = testServer });
+        for (int i = 0; i < 3; i++)
+            testServer.AddCommand(new Test2());
+        testServer.threadServerLogic.Join();
+        for (int i = 0; i < 2; i++) testServer.AddCommand(new Test2());
+        Console.WriteLine("Поток сервера был мягко остановлен.");
+
+#!csharp
+
+Console.WriteLine("Тест HardStop");
+
+ServerThread testServer2 = new ServerThread();
+
+for (int i = 0; i < 3; i++)
+    testServer2.AddCommand(new Test1());
+testServer2.AddCommand(new HardStop { serverThread = testServer2 });
+for (int i = 0; i < 3; i++)
+    testServer2.AddCommand(new Test2());
+testServer2.threadServerLogic.Join();
+for (int i = 0; i < 2; i++)
+    testServer2.AddCommand(new Test2());
+Console.WriteLine("Поток сервера был жестко остановлен.");
 
 #!markdown
 
