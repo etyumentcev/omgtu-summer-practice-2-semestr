@@ -32,21 +32,36 @@
 
 #!csharp
 
-//
-// Вычисление определенного интеграла
-//
+using System;
+using System.Threading;
+
 class DefiniteIntegral
 {
-    //
-    // a, b - границы отрезка, на котором происходит вычисление опредленного интеграла
-    // function - функция, для которой вычисляется определнный интеграл
-    // step - размер одного шага разбиения
-    // threadsNumber - число потоков, которые используются для вычислений
-    //
-    public static double Solve(double a, double b, Func<double, double> function, double step, int threadsnumber)
+    public static double Solve(double a, double b, Func<double, double> function, double step, int threadsNumber)
     {
-        // отсюда надо начинать реализацию задачи
-        return 0.0;
+        if(!Double.IsNormal(a) || !Double.IsNormal(b) || !Double.IsNormal(step) || !Double.IsNormal(threadsNumber))
+        {
+            throw new Exception("Invalid input");
+        }
+
+        Barrier barrier = new Barrier(threadsNumber);
+        int numberOfSteps = Convert.ToInt32((b - a) / step);
+        double sum = 0;
+        
+        Parallel.For(0, threadsNumber, (i) =>
+        {
+            double subSum = 0;
+            for (int k = i; k < numberOfSteps - 1; k += threadsNumber)
+            {
+                subSum += function(a + k * step) + function(a + (k + 1) * step);
+            }
+
+            subSum *= step / 2;
+            Interlocked.Exchange(ref sum, sum + subSum);
+            barrier.SignalAndWait();
+        });
+
+        return sum;
     }
 }
 
