@@ -17,13 +17,13 @@
 Некоторые из команд не могут выполнить всю работу за один вызов метода Execute без блокирования на длительное время выполнения всех остальных командд из очереди.
 
 Например, если какая-нибудь сетевая игра представлена командой, то пока одна игра не закончится, следующая не начнется. Чтобы эффективнее использовать процессорные
-можности, нужно обеспечить возхможность поиграть как можно большему количеству игроков.
+возможности, нужно обеспечить возможность поиграть как можно большему количеству игроков.
 
 Для этого используют режим псевдопараллельной обработки. Когда все время работы разбивают на небольшие отрезки, каждый из которых выполняется
 за один вызов метода Execute. Чтобы выполнить всю работу, нужно вызвать метод Execute несколько раз, до тех пор пока работа не будет завершена.
-Это позволяет между вызовами Execute одного экземплыра команды вызывать метод Execute других команд.
+Это позволяет между вызовами Execute одного экземпляра команды вызывать метод Execute других команд.
 
-Так устроен, например, ренедринг страницы в браузере. Только в браузеоре это используется не для рендеренга всех вкладок, а для обработки 
+Так устроен, например, ренедеринг страницы в браузере. Только в браузере это используется не для рендеренга всех вкладок, а для обработки 
 реакций пользователя на странице.
 
 В прошлой работе все команды, которые выполнялись в потоке, брались из очереди. Поэтому первая идея - это положить долгоиграющую операцию обратно в очередь.
@@ -33,18 +33,9 @@
 Чтобы избежать мертвой блокировки потока, необходимо ввести понятие Планировщика, который будет отвечать за выбор следующей длительной задачи для выполнения,
 а чтение из очереди оставить только для новых операций. 
 
-#!csharp
-
-public interface IScheduler
-{
-    bool HasCommand()
-    ICommand Select();
-    void Add(ICommand cmd);
-}
-
 #!markdown
 
-Необходимо реализовать поток, который способен реализоввывать длительные операции.
+Необходимо реализовать поток, который способен реализовывать длительные операции.
 
 **Указание.** 
 1. В практической работе №7 из очереди команды извлекались блокируеммым образом с помощью метода Take(), при наличии планировщика так делать нельзя: поток
@@ -55,3 +46,271 @@ public interface IScheduler
 Необходимо учесть этот момент при реализации очереди.
 
 2. Для обепечения справедливости стратегии планировщика в слабом смысле использовать стратегию Round Robbin (циклическую) для определения следующего потока на исполнение.
+
+#!csharp
+
+using System;
+using System.Collections.Concurrent;
+using System.Collections.Generic;
+using System.Threading;
+
+public interface ICommand
+{
+    void Execute();
+    bool IsCompleted { get; }
+}
+public static bool softStopRequested = false;
+
+#!csharp
+
+public class LongRunningCommand : ICommand
+{
+    private int _stepsToComplete;
+    private int _currentStep;
+
+    public LongRunningCommand(int stepsToComplete)
+    {
+        _stepsToComplete = stepsToComplete;
+        _currentStep = 0;
+    }
+
+    public bool IsCompleted => _currentStep >= _stepsToComplete;
+
+    public void Execute()
+    {
+        if (_currentStep < _stepsToComplete)
+        {
+            Console.WriteLine($"Выполнение шага {_currentStep + 1} из {_stepsToComplete}");
+            _currentStep++;
+        }
+    }
+}
+
+#!csharp
+
+public class Scheduler
+{
+    private readonly Queue<ICommand> _longRunningCommands = new Queue<ICommand>();
+
+    public void AddCommand(ICommand command)
+    {
+        _longRunningCommands.Enqueue(command);
+    }
+
+    public ICommand GetNextCommand()
+    {
+        if (_longRunningCommands.Count > 0)
+        {
+            ICommand command = _longRunningCommands.Dequeue();
+            if (!command.IsCompleted)
+            {
+                _longRunningCommands.Enqueue(command);
+            }
+            return command;
+        }
+        return null;
+    }
+}
+
+#!csharp
+
+public class HardStop : ICommand
+{
+    private readonly Thread _targetThread;
+
+    public HardStop(Thread targetThread)
+    {
+        _targetThread = targetThread ?? throw new ArgumentNullException(nameof(targetThread));
+    }
+
+    public bool IsCompleted => true;
+
+    public void Execute()
+    {
+        if (!IsCurrentThreadTargetThread())
+        {
+            throw new InvalidOperationException("Команда HardStop не может быть выполнена в другом потоке");
+        }
+        StopThreadImmediately();
+    }
+
+    private bool IsCurrentThreadTargetThread()
+    {
+        return _targetThread == Thread.CurrentThread;
+    }
+
+    private void StopThreadImmediately()
+    {
+        _targetThread.Interrupt();
+    }
+}
+
+#!csharp
+
+public class SoftStop : ICommand
+{
+    private readonly BlockingCollection<ICommand> _commandQueue;
+    private readonly Thread _targetThread;
+
+    public SoftStop(BlockingCollection<ICommand> commandQueue, Thread targetThread)
+    {
+        _commandQueue = commandQueue ?? throw new ArgumentNullException(nameof(commandQueue));
+        _targetThread = targetThread ?? throw new ArgumentNullException(nameof(targetThread));
+    }
+
+    public bool IsCompleted => true;
+
+    public void Execute()
+    {
+        if (!IsCurrentThreadTargetThread())
+        {
+            throw new InvalidOperationException("Команда SoftStop не может быть выполнена в другом потоке");
+        }
+
+        if (softStopRequested)
+        {
+            ExecutePendingCommands();
+        }
+    }
+
+    private bool IsCurrentThreadTargetThread()
+    {
+        return _targetThread == Thread.CurrentThread;
+    }
+
+    private void ExecutePendingCommands()
+    {
+        while (_commandQueue.Count > 0)
+        {
+            var command = GetNextCommand();
+            command.Execute();
+        }
+    }
+
+    private ICommand GetNextCommand()
+    {
+        return _commandQueue.Take();
+    }
+}
+
+#!csharp
+
+public static class ExceptionHandler
+{
+    public static void Handle(Exception exception, ICommand command)
+    {
+        Console.WriteLine("Исключение " + exception + " при выполнении команды: " + command.GetType().Name);
+    }
+}
+
+#!csharp
+
+public class ServerThread
+{
+    private readonly BlockingCollection<ICommand> _commandQueue = new BlockingCollection<ICommand>();
+    private readonly Scheduler _scheduler = new Scheduler();
+    public Thread WorkerThread { get; private set; }
+
+    public ServerThread()
+    {
+        WorkerThread = new Thread(Run);
+        WorkerThread.Start();
+    }
+
+    private void Run()
+    {
+        while (!softStopRequested)
+        {
+            ICommand command = _scheduler.GetNextCommand() ?? GetNextCommandFromQueue();
+
+            if (command != null)
+            {
+                try
+                {
+                    if (command is SoftStop)
+                    {
+                        softStopRequested = true;
+                        ExecuteRemainingCommands();
+                        break;
+                    }
+                    else if (command is HardStop)
+                    {
+                        break;
+                    }
+                    command.Execute();
+                    if (!command.IsCompleted)
+                    {
+                        _scheduler.AddCommand(command);
+                    }
+                }
+                catch (Exception ex)
+                {
+                    ExceptionHandler.Handle(ex, command);
+                }
+            }
+            else
+            {
+                Thread.Sleep(50);
+            }
+        }
+    }
+
+    private ICommand GetNextCommandFromQueue()
+    {
+        _commandQueue.TryTake(out ICommand command);
+        return command;
+    }
+
+    private void ExecuteRemainingCommands()
+    {
+        while (_commandQueue.TryTake(out ICommand remainingCommand))
+        {
+            try
+            {
+                remainingCommand.Execute();
+            }
+            catch (Exception ex)
+            {
+                ExceptionHandler.Handle(ex, remainingCommand);
+            }
+        }
+    }
+
+    public void EnqueueCommand(ICommand command)
+    {
+        _commandQueue.Add(command);
+    }
+}
+
+#!csharp
+
+public class TestCommand : ICommand
+{
+    public bool IsCompleted => true;
+
+    public void Execute()
+    {
+        Console.WriteLine("Сервер выполняет задачу...");
+    }
+}
+
+#!csharp
+
+ServerThread serverThread = new ServerThread();
+
+        serverThread.EnqueueCommand(new TestCommand());
+        serverThread.EnqueueCommand(new LongRunningCommand(5));
+        serverThread.EnqueueCommand(new TestCommand());
+
+        try
+        {
+            ICommand stopCommand = new HardStop(serverThread.WorkerThread);
+            serverThread.EnqueueCommand(stopCommand);
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"Ошибка: {ex.Message}");
+        }
+
+        serverThread.EnqueueCommand(new TestCommand());
+        serverThread.WorkerThread.Join();

@@ -24,7 +24,6 @@ public interface ICommand
 
 #!markdown
 
-
 Реализовать класс ServerThread и команды по hard и soft завершению потока. 
 
 ServerThread может менять свое поведение для обработки следующей Команды.
