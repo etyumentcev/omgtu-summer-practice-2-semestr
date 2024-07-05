@@ -20,6 +20,11 @@
 
 #!csharp
 
+using System;
+using System.Collections.Generic;
+using System.Threading;
+using System.Threading.Tasks;
+
 public interface ICommand
 {
     void Execute();
@@ -70,7 +75,7 @@ public class CommandScheduler
         }
         catch (AggregateException)
         {
-
+            // Игнорировать исключение при отмене задачи
         }
     }
 
@@ -82,7 +87,9 @@ public class CommandScheduler
             {
                 ICommand command = commandQueue.Dequeue();
                 command.Execute();
+                // Перекинуть команду назад в очередь для повторного выполнения
                 commandQueue.Enqueue(command);
+                // Симуляция длительной работы
                 Thread.Sleep(1000);
             }
         }
