@@ -20,21 +20,91 @@
 
 #!csharp
 
-interface ICommand
+public interface ICommand
 {
     void Execute();
 }
 
 
-public class TestCommand(int id) : ICommand
+public class TestCommand : ICommand
 {
-    int counter = 0;
+    private int id;
+    private int counter = 0;
+
+    public TestCommand(int id)
+    {
+        this.id = id;
+    }
 
     public void Execute()
     {
         Console.WriteLine($"Поток {id} вызов {++counter}");
     }
 }
+
+#!csharp
+
+public class CommandScheduler
+{
+    private Queue<ICommand> commandQueue = new Queue<ICommand>();
+    private CancellationTokenSource cancellationTokenSource = new CancellationTokenSource();
+    private Task schedulerTask;
+
+    public void AddCommand(ICommand command)
+    {
+        commandQueue.Enqueue(command);
+    }
+
+    public void Start()
+    {
+        cancellationTokenSource = new CancellationTokenSource();
+        schedulerTask = Task.Run(() => RunScheduler(cancellationTokenSource.Token));
+    }
+
+    public void HardStop()
+    {
+        cancellationTokenSource.Cancel();
+        try
+        {
+            schedulerTask.Wait();
+        }
+        catch (AggregateException)
+        {
+
+        }
+    }
+
+    private void RunScheduler(CancellationToken cancellationToken)
+    {
+        while (!cancellationToken.IsCancellationRequested)
+        {
+            if (commandQueue.Count > 0)
+            {
+                ICommand command = commandQueue.Dequeue();
+                command.Execute();
+                commandQueue.Enqueue(command);
+                Thread.Sleep(1000);
+            }
+        }
+    }
+}
+
+#!csharp
+
+CommandScheduler scheduler = new CommandScheduler();
+
+for (int i = 1; i <= 5; i++)
+{
+    scheduler.AddCommand(new TestCommand(i));
+}
+
+scheduler.Start();
+
+Thread.Sleep(15000);
+
+scheduler.HardStop();
+
+Console.WriteLine("Планировщик остановлен.");
 
 #!markdown
 
