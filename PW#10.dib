@@ -36,3 +36,325 @@
 1. [Паттерн Сообщение](https://www.enterpriseintegrationpatterns.com/patterns/messaging/Message.html)
 2. [Паттерн Роутер - весь раздел про Роутеры](https://www.enterpriseintegrationpatterns.com/patterns/messaging/MessageRoutingIntro.html)
 3. [Обмен сообщеними](https://www.enterpriseintegrationpatterns.com/patterns/messaging/MessageConstructionIntro.html)
+
+#!csharp
+
+using System;
+using System.Collections.Concurrent;
+using System.Collections.Generic;
+using System.Threading;
+
+public interface ICommand
+{
+    void Execute();
+    int Id { get; }
+}
+
+public interface IScheduler
+{
+    bool HasCommand();
+    ICommand SelectCommand();
+    void AddCommand(ICommand command);
+}
+
+#!csharp
+
+public struct Message
+{
+    public int Id { get; }
+    public string Content { get; }
+
+    public Message(int id, string content)
+    {
+        Id = id;
+        Content = content;
+    }
+}
+
+#!csharp
+
+public class ExceptionHandler
+{
+    public static void Handle(Exception ex)
+    {
+        Console.WriteLine($"Сообщение об ошибке:\n\t{ex.Message}");
+    }
+}
+
+#!csharp
+
+public class Scheduler : IScheduler
+{
+    private readonly BlockingCollection<ICommand> _commandQueue = new();
+
+    public bool HasCommand() => !_commandQueue.IsCompleted && _commandQueue.Count > 0;
+
+    public ICommand SelectCommand() => _commandQueue.Take();
+
+    public void AddCommand(ICommand command) => _commandQueue.Add(command);
+}
+
+#!csharp
+
+public interface IMessageHandler
+{
+    void AddMessage(Message message);
+    void HandleMessages();
+    bool IsCompleted { get; }
+}
+
+public class Router : ICommand
+{
+    private readonly ConcurrentQueue<Message> _messageQueue = new();
+    private readonly Dictionary<int, IMessageHandler> _commandHandlers = new();
+    public int Id { get; init; } = 0;
+
+    public void Execute()
+    {
+        while (_messageQueue.TryDequeue(out var message))
+        {
+            if (_commandHandlers.TryGetValue(message.Id, out var handler))
+            {
+                if (handler.IsCompleted)
+                {
+                    _commandHandlers.Remove(message.Id);
+                }
+                else
+                {
+                    handler.AddMessage(message);
+                }
+            }
+            else
+            {
+                Console.WriteLine($"Ошибка роутера: Команда с id '{message.Id}' не найдена");
+            }
+        }
+    }
+
+    public void AddCommand(int id, IMessageHandler handler)
+    {
+        lock (_commandHandlers)
+        {
+            _commandHandlers[id] = handler;
+        }
+    }
+
+    public void AddMessage(Message message) => _messageQueue.Enqueue(message);
+
+    public void RemoveCommand(int id)
+    {
+        lock (_commandHandlers)
+        {
+            _commandHandlers.Remove(id);
+        }
+    }
+}
+
+#!csharp
+
+public class ServerThread
+{
+    private readonly BlockingCollection<ICommand> _serverQueue = new();
+    private bool _needStop = false;
+    public readonly Scheduler Scheduler;
+    private readonly Router _router;
+
+    public Thread Thread { get; }
+
+    public ServerThread(Router router)
+    {
+        _router = router;
+        Scheduler = new Scheduler();
+        Thread = new Thread(RunServer);
+        Thread.Start();
+    }
+
+    private void RunServer()
+    {
+        while (true)
+        {
+            if (_needStop && _serverQueue.Count == 0 && !Scheduler.HasCommand())
+            {
+                break;
+            }
+
+            _router.Execute();
+
+            ICommand command;
+            if (Scheduler.HasCommand())
+            {
+                command = Scheduler.SelectCommand();
+            }
+            else if (!_serverQueue.TryTake(out command))
+            {
+                Thread.Sleep(10);
+                continue;
+            }
+
+            try
+            {
+                command.Execute();
+            }
+            catch (ThreadInterruptedException)
+            {
+                break;
+            }
+            catch (Exception ex)
+            {
+                ExceptionHandler.Handle(ex);
+                break;
+            }
+        }
+    }
+
+    public void AddCommand(ICommand command)
+    {
+        if (command is IMessageHandler handler)
+        {
+            _router.AddCommand(command.Id, handler);
+        }
+        _serverQueue.Add(command);
+    }
+
+    public void StopWithEmptyQueue() => _needStop = true;
+}
+
+#!csharp
+
+public class HardStopCommand : ICommand
+{
+    private readonly ServerThread _serverThread;
+    public int Id { get; init; } = 0;
+
+    public HardStopCommand(ServerThread serverThread)
+    {
+        _serverThread = serverThread;
+    }
+
+    public void Execute()
+    {
+        if (_serverThread.Thread != Thread.CurrentThread)
+        {
+            throw new Exception("Ошибка жесткой остановки: Получен поток для обработки, который не является текущим!");
+        }
+
+        throw new ThreadInterruptedException();
+    }
+}
+
+#!csharp
+
+public class SoftStopCommand : ICommand
+{
+    private readonly ServerThread _serverThread;
+    public int Id { get; init; } = 0;
+
+    public SoftStopCommand(ServerThread serverThread)
+    {
+        _serverThread = serverThread;
+    }
+
+    public void Execute()
+    {
+        if (_serverThread.Thread != Thread.CurrentThread)
+        {
+            throw new Exception("Ошибка мягкой остановки: Получен поток для обработки, который не является текущим!");
+        }
+
+        _serverThread.StopWithEmptyQueue();
+    }
+}
+
+#!csharp
+
+public class LongCommand : ICommand, IMessageHandler
+{
+    private readonly Queue<Message> _messageQueue = new();
+    private readonly ServerThread _serverThread;
+    private readonly ICommand _baseCommand;
+    public int Id { get; private set; }
+    public bool IsCompleted { get; private set; }
+    private int _counter;
+
+    public LongCommand(ServerThread serverThread, ICommand baseCommand, int counter)
+    {
+        _serverThread = serverThread;
+        _baseCommand = baseCommand;
+        Id = baseCommand.Id;
+        _counter = counter;
+    }
+
+    public void Execute()
+    {
+        if (_counter == 0)
+        {
+            IsCompleted = true;
+            return;
+        }
+        _counter--;
+
+        HandleMessages();
+        _baseCommand.Execute();
+
+        _serverThread.Scheduler.AddCommand(this);
+    }
+
+    public void HandleMessages()
+    {
+        while (_messageQueue.Count > 0)
+        {
+            var message = _messageQueue.Dequeue();
+            Console.WriteLine($"Команда {message.Id} получила сообщение: {message.Content}");
+        }
+    }
+
+    public void AddMessage(Message message)
+    {
+        lock (_messageQueue)
+        {
+            _messageQueue.Enqueue(message);
+        }
+    }
+}
+
+#!csharp
+
+public class TestCommand : ICommand
+{
+    public int Id { get; private set; }
+    private int _executionCount = 0;
+
+    public TestCommand(int id)
+    {
+        Id = id;
+    }
+
+    public void Execute()
+    {
+        Console.WriteLine($"Команда {Id} вызов {_executionCount + 1}");
+        _executionCount++;
+    }
+}
+
+#!csharp
+
+var router = new Router();
+var server = new ServerThread(router);
+
+for (int i = 1; i <= 2; i++)
+{
+    var longCommand = new LongCommand(server, new TestCommand(i), 3);
+    server.AddCommand(longCommand);
+}
+
+router.AddMessage(new Message(1, "Сообщение для команды 1"));
+router.AddMessage(new Message(2, "Сообщение для команды 2"));
+router.AddMessage(new Message(3, "Сообщение для команды 3"));
+Thread.Sleep(1000);
+router.AddMessage(new Message(1, "Сообщение для команды 1 повторное"));
+
+server.AddCommand(new HardStopCommand(server));
+
+server.Thread.Join();
+
+Console.WriteLine("Сервер остановлен.");
