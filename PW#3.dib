@@ -35,32 +35,64 @@
 //
 // Вычисление определенного интеграла
 //
-class DefiniteIntegral
-{
-    //
-    // a, b - границы отрезка, на котором происходит вычисление опредленного интеграла
-    // function - функция, для которой вычисляется определнный интеграл
-    // step - размер одного шага разбиения
-    // threadsNumber - число потоков, которые используются для вычислений
-    //
-    public static double Solve(double a, double b, Func<double, double> function, double step, int threadsnumber)
-    {
-        // отсюда надо начинать реализацию задачи
-        return 0.0;
-    }
+using System.Threading; 
+class DefiniteIntegral 
+{ 
+ 
+    public static double Solve(double a, double b, Func<double, double> function, double step, int threadsnumber) 
+    {  
+        double Result = 0.0; 
+        Thread[] threads = new Thread[threadsnumber]; 
+        Barrier barrier = new Barrier (threadsnumber); 
+        int kolvo_step = Convert.ToInt32((b-a)/step); 
+        int step_Thr = kolvo_step/threadsnumber; 
+        for (int i=0; i<threadsnumber;i++) 
+        { 
+            int x = i; 
+            threads[i] = new Thread(() => Trapezoida(a+x*((b-a)/threadsnumber), a+(x+1)*((b-a)/threadsnumber))); 
+            threads[i].Start(); 
+        } 
+        for (int i = 0; i<threadsnumber; i++) 
+        { 
+            threads[i].Join(); 
+        } 
+        return Result*=step; 
+     
+        double Trapezoida(double Nach, double Kon) 
+        { 
+            double thread_res = 0.0; 
+            double x; 
+            double newres; 
+            double output; 
+ 
+            for (int i = 1; i<step_Thr; i++) 
+            { 
+                x = Nach + i*step; 
+                thread_res+=function(x); 
+            } 
+ 
+            thread_res+=0.5*(function(Nach)+function(Kon)); 
+            do 
+            { 
+                newres=Result; 
+                output = thread_res+newres; 
+            } 
+            while(newres!=Interlocked.CompareExchange(ref Result, output,newres)); 
+            barrier.SignalAndWait(); 
+            return output; 
+        } 
+    } 
 }
 
 #!csharp
 
-#r "nuget: xunit, 2.8.1"
-
-using Xunit;
-
-var X = (double x) => x;
-var SIN = (double x) => Math.Sin(x);
-
-Assert.Equal(0, DefiniteIntegral.Solve(-1, 1, X, 1e-4, 2), 1e-4);
-
-Assert.Equal(0, DefiniteIntegral.Solve(-1, 1, SIN, 1e-5, 8), 1e-4);
-
-Assert.Equal(10, DefiniteIntegral.Solve(0, 5, X, 1e-6, 8), 1e-5);
+#r "nuget: xunit, 2.8.1" 
+ 
+using Xunit; 
+ 
+var X = (double x) => x; 
+var SIN = (double x) => Math.Sin(x); 
+ 
+Assert.Equal(0, DefiniteIntegral.Solve(-1, 1, X, 1e-4, 2), 1e-4); 
+Assert.Equal(0, DefiniteIntegral.Solve(-1, 1, SIN, 1e-5, 8), 1e-4); 
+Assert.Equal(50, DefiniteIntegral.Solve(0, 10, X, 1e-6, 8), 1e-5);
