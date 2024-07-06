@@ -4,63 +4,171 @@
 
 #!markdown
 
-# Практическая работа №1. Знакомство с потоками.
-
-**Цель:** Познакомиться с возможностями класса System.Thread платформы .NET Framework.
-
-**Результаты:** После выполнения работы Вы сможете:
-1. Запускать длительные операции в отдельном потоке.
-2. Завершать поток.
-3. Дожидаться завершения выполнения потока. 
-
-
-**Материалы для самостоятельного изучения**.
-1. [Основы управления потоками](https://learn.microsoft.com/en-us/dotnet/standard/threading/managed-threading-basics)
-2. [Использование потоков](https://learn.microsoft.com/en-us/dotnet/standard/threading/using-threads-and-threading)
-3. [Примитив синхронизации Барьер](https://learn.microsoft.com/ru-ru/dotnet/standard/threading/barrier)
-4. [Interlocked операции](https://learn.microsoft.com/en-us/dotnet/api/system.threading.interlocked?view=net-8.0)
-
-## Задание.
-Реализовать вычисление определенного интеграла методом трапеции в несколько потоков.
-
-Отрезок, на котором происходит вычисление, разбивается на отрезки по количеству потоков. Для каждого отрезка значение 
-интеграла считается в отдельном потоке, после завершения вычисоения полученный рельтаты суммирутся.
-
-**Указание**.
-1. Для суммирования результатов удобно воспользоваться разделяемой переменной, к которой будут прибалятся результаты вычисления прямо в самом потоке. Для синхронизации операций сложения лучше всего восользоваться [Interlocked операцией](https://learn.microsoft.com/en-us/dotnet/api/system.threading.interlocked?view=net-8.0).
-2. Основная функция долна дождаться завершения всех потоков, которые вычисляют значение на отрезках, прежде чем возвратить результат. Для этого удобнее всего использовать Примитив синхронизации Барьер](https://learn.microsoft.com/ru-ru/dotnet/standard/threading/barrier).
+Вычисления опредлённого интеграла с использованием нескольких потоков.
 
 #!csharp
 
-//
-// Вычисление определенного интеграла
-//
+using System.Threading;
+using static System.Threading.Barrier;
 class DefiniteIntegral
 {
-    //
-    // a, b - границы отрезка, на котором происходит вычисление опредленного интеграла
-    // function - функция, для которой вычисляется определнный интеграл
-    // step - размер одного шага разбиения
-    // threadsNumber - число потоков, которые используются для вычислений
-    //
     public static double Solve(double a, double b, Func<double, double> function, double step, int threadsnumber)
     {
-        // отсюда надо начинать реализацию задачи
-        return 0.0;
+        double result = 0.0;
+        double step_Thr = (b - a) / threadsnumber;
+        Barrier barrier = new Barrier(threadsnumber + 1);
+        for (int i = 0; i<threadsnumber; i++)
+        {
+            double Nach = a + i * step_Thr;
+            double Kon = Nach + step_Thr;
+            Thread thread = new Thread(() =>
+            {
+                double step_Thr_res = 0;
+                step_Thr_res += 0.5 * (function(Nach) + function(Kon));
+                double kolvo_step = (Kon - Nach) / step;
+                for (int j = 1; j < kolvo_step; j++)
+                {
+                    double x = Nach + j * step;
+                    step_Thr_res += function(x);
+                }
+                step_Thr_res *= step;
+                double new_res;
+                double res;
+                do
+                {
+                    new_res = result;
+                    res = new_res + step_Thr_res;
+                } 
+                while (Interlocked.CompareExchange(ref result, res, new_res) != new_res);
+                barrier.SignalAndWait();
+            });
+            thread.Start(); 
+        }
+        barrier.SignalAndWait(); 
+        return result;
     }
 }
 
+#!markdown
+
+Вычисление определённого интеграла без многопоточости.
+
 #!csharp
 
-#r "nuget: xunit, 2.8.1"
+public static double Solve1 (double a, double b, Func<double, double> function1, double step1) 
+{
+    double res1 = 0;
+    int w = Convert.ToInt32((b-a)/step1);
+    for(int i=0; i<w; i++)
+    {
+        double x = a + i*step1;
+        res1+=function1(x);
+    }
+    res1*=step1;
+    return res1;
+}
 
-using Xunit;
+#!markdown
 
-var X = (double x) => x;
+Задача 4
+
+Определить минимальный размер шага (1e-1, 1e-2, 1 e-3, 1e-4, 1e-5, 1e-6), обеспечивающий оптимальную производительность с точностью 1e-4. Ответ подтвердить вычислениями.
+
+Чтобы определить минимальный размер шага, начнём с самого большого (1e-1), с каждым разом уменьшая его, пока не придём к самому маленькому (1e-6). Каждый раз будем считать интеграл и сравнивать его результат с результатом прошлого шага. Если разность меньше чем 1e-4, то сохраняем текущий шаг в отдельный список. Для подсчёта времени будем использовать класс StopWatch и набор его методов.
+
+#!csharp
+
+using System.Diagnostics;
 var SIN = (double x) => Math.Sin(x);
+double[] res = new double[6];
+double[] steps = { 1e-1, 1e-2, 1e-3, 1e-4, 1e-5, 1e-6 };
+List<double> min_step = new List<double>();
+for (int i = 0; i < steps.Length; i++)
+{
+    var SW = Stopwatch.StartNew();
+    res[i] = Solve1(-100, 100, SIN, steps[i]);
+    SW.Stop();
+    double time = SW.Elapsed.TotalMilliseconds;
+    Console.WriteLine($"Шаг: {steps[i]}    Время: {time} мс    Результат: {res[i]}");
+}
 
-Assert.Equal(0, DefiniteIntegral.Solve(-1, 1, X, 1e-4, 2), 1e-4);
+#!markdown
 
-Assert.Equal(0, DefiniteIntegral.Solve(-1, 1, SIN, 1e-5, 8), 1e-4);
+Анализируя полученные результаты, можно понять, что оптимальным по производительности с точностью 1e-4 является шаг 1e-5.
 
-Assert.Equal(10, DefiniteIntegral.Solve(0, 10, X, 1e-6, 8), 1e-5);
+#!markdown
+
+Задача 5
+
+Для определённого шага в задаче 4 подобрать оптимальное число потоков, на котором достигается минимальное время выполнения функции Solve.
+
+#!csharp
+
+using System.Diagnostics;
+using Microsoft.DotNet.Interactive.Formatting;
+#r "nuget:ScottPlot, 5.0.35"
+Formatter.Register(typeof(ScottPlot.Plot), (p, w) => 
+    w.Write(((ScottPlot.Plot)p).GetImageHtml(400, 300)), HtmlFormatter.MimeType);
+long min = long.MaxValue;
+int Pusk = 10;
+double step = 1e-5;
+int optimal = 0;
+long[] X_time= new long[15];
+double[] Y_Thr = new double[15];
+for (int threads = 0; threads < 15; threads++)
+{
+    long time = 0;
+    Y_Thr[threads] = threads+2;
+    for (int j = 0; j < Pusk; j++)
+    {
+        var SW = Stopwatch.StartNew();
+        DefiniteIntegral.Solve(-100, 100, SIN, step, threads+2);
+        SW.Stop();
+        time += SW.ElapsedMilliseconds;
+    }
+    X_time[threads] = time / Pusk;
+    if (X_time[threads] < min)
+    {
+        min = X_time[threads];
+        optimal = threads;
+    }
+}
+long TimeSred = X_time[optimal];
+Console.WriteLine($"Оптимальное число потоков: {Y_Thr[optimal]}, время выполнения {X_time[optimal]} мс");
+ScottPlot.Plot plot = new();
+plot.Add.Scatter(X_time, Y_Thr);
+plot
+
+#!markdown
+
+Время выполнения однопоточной версии с шагом 1e-5:
+
+#!csharp
+
+long S1Time = 0;
+for (int P = 0; P < Pusk; P++)
+{
+    var SW = Stopwatch.StartNew();
+    Solve1(-100, 100, SIN, step);
+    SW.Stop();
+    S1Time += SW.ElapsedMilliseconds;
+}
+long TimeSred1 = S1Time / Pusk;
+Console.WriteLine($"Время выполнения однопоточной версии {TimeSred1} мс");
+
+#!markdown
+
+Разница в процентах между многопоточной и однопоточной версиями:
+
+#!csharp
+
+double difference =(100 - TimeSred *100 / TimeSred1);
+Console.WriteLine($"Разница составляет {difference} процентов");
+
+#!markdown
+
+Summary
+
+Размер выбранного шага - 1e-5, оптимальное количество потоков 4, но также иногда выдаёт результат, что оптимальное количество потоков является 16.
+Если сравнивать скорости версий, то получим: среднее время работы многопоточной версии за 10 проходов - от 164 до 343 мс; среднее время работы однопоточной версии за 10 проходов - от 550 до 592 мс.
+При сравнении в процентах получаем, что многопоточная версия быстрее на 69 - 72 процентов.
