@@ -39,8 +39,166 @@
 
 #!markdown
 
-// здесь писать код
+Исследование производительности BlockingCollection:
+
+#!csharp
+
+using System.Collections.Concurrent; 
+using System.Collections.Generic; 
+using System.Threading; 
+using System.Diagnostics; 
+public static long Blockcollect() 
+{    
+var SW = new Stopwatch(); 
+var Collect = new BlockingCollection<int>(); 
+var startE = new ManualResetEvent(false); 
+var stopE = new ManualResetEvent(false); 
+Thread thread1 = new Thread(() => 
+{ 
+    startE.Set(); 
+    stopE.WaitOne(); 
+    for (int i = 0; i < 1000000; i++) 
+    { 
+        Collect.Add(i); 
+    } 
+    stopE.Set(); 
+}); 
+Thread thread2 = new Thread(() => 
+{ 
+    startE.WaitOne(); 
+    stopE.Set(); 
+    for (int i = 0; i < 1000000; i++) 
+    { 
+        Collect.Take(); 
+    } 
+    stopE.Set(); 
+}); 
+SW.Start(); 
+thread1.Start(); 
+thread2.Start(); 
+SW.Stop(); 
+return SW.ElapsedMilliseconds; 
+} 
+double[] Blockcollecttime = new double[10]; 
+for (int i = 0; i < 10; i++) 
+{ 
+    Blockcollecttime[i] = Blockcollect(); 
+} 
+double Blockcollectavg = Blockcollecttime.Sum(); 
+Console.WriteLine($"Время выполнения BlockingCollection -{Blockcollectavg}- мс");
+
+#!markdown
+
+Исследование производительyости ConcurrentQueue:
+
+#!csharp
+
+public static long Concurrentq() 
+{ 
+var SW = new Stopwatch(); 
+var queue = new ConcurrentQueue<int>(); 
+var startE = new ManualResetEvent(false); 
+var stopE = new ManualResetEvent(false); 
+Thread thread1 = new Thread(() => 
+{ 
+    startE.Set(); 
+    stopE.WaitOne(); 
+    for (int i = 0; i < 1000000; i++) 
+    { 
+        queue.Enqueue(i); 
+    } 
+}); 
+Thread thread2 = new Thread(() => 
+{ 
+    startE.WaitOne(); 
+    stopE.Set(); 
+    for (int i = 0; i < 1000000; i++) 
+    { 
+        queue.TryDequeue(out _); 
+    } 
+}); 
+SW.Start(); 
+thread1.Start(); 
+thread2.Start(); 
+SW.Stop(); 
+return SW.ElapsedMilliseconds; 
+} 
+double[] Concurrentqtime = new double[10]; 
+for (int i = 0; i < 10; i++) 
+{ 
+    Concurrentqtime[i] = Concurrentq(); 
+} 
+double ConcurSred = Concurrentqtime.Sum(); 
+Console.WriteLine($"Время выполнения ConcurrentQueue -{ConcurSred}- мс");
+
+#!markdown
+
+Непотоко-безопасная очередь:
+
+#!csharp
+
+public static long Queue()
+{
+var queue = new Queue();
+var SW = new Stopwatch();
+SW.Start();
+for (int i = 0; i < 1000000; i++)
+{
+    queue.Enqueue(i);
+}
+for (int i = 0; i < 1000000; i++)
+{
+    queue.Dequeue();
+}
+SW.Stop();
+return SW.ElapsedMilliseconds;
+}
+double[] QTime = new double[10];
+for (int i = 0; i < 10; i++)
+{
+    QTime[i] = Queue();
+}
+double QSred = QTime.Sum();
+Console.WriteLine($"Время выполнения Queue -{QSred}- мс");
+
+#!markdown
+
+Информация о тестах можно увидеть на графиках:
+
+#!csharp
+
+#r "nuget:ScottPlot, 5.0.35"
+using Microsoft.DotNet.Interactive.Formatting;
+Formatter.Register(typeof(ScottPlot.Plot), (p, w) => 
+    w.Write(((ScottPlot.Plot)p).GetImageHtml(400, 300)), HtmlFormatter.MimeType);
+ScottPlot.Plot plot1 = new();
+ScottPlot.Plot plot2 = new();
+ScottPlot.Plot plot3 = new();
+plot1.Add.Scatter(Enumerable.Range(1, 10).Select(x => (double)x).ToArray(), Blockcollecttime);
+plot2.Add.Scatter(Enumerable.Range(1, 10).Select(x => (double)x).ToArray(), Concurrentqtime);
+plot3.Add.Scatter(Enumerable.Range(1, 10).Select(x => (double)x).ToArray(), QTime);
+Console.WriteLine("График для BlockingCollection");
+plot1
+
+#!csharp
+
+Console.WriteLine("График для ConcurrentQueue");
+plot2
+
+#!csharp
+
+Console.WriteLine("График для Queue");
+plot3
+
+#!csharp
+
+double difference =(100 - ConcurSred * 100 / QSred); 
+Console.WriteLine($"Быстрее на {difference} % в сравнении с обычной очередью");
 
 #!markdown
 
 ## Вывод
+
+Самой эффективной из потоко-безопасный коллекций является - ConcurrentQueue, её время выполения 90-141 мс (у остальных не менее 452 мс).
+
+ConcurrentQueue эффективнее, чем обычная очередь на 72 - 86%.
