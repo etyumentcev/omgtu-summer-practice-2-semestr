@@ -62,6 +62,47 @@ var queue2 = new BlockingCollection<Message>(2); //очередь второго
 
 // Здесь писать решение
 
+static AutoResetEvent ev = new AutoResetEvent(false);
+static AutoResetEvent ev1 = new AutoResetEvent(true);
+queue1.Add(new Message());
+List<int> count = new List<int>();
+Thread thr = new (() =>
+{
+    for(int i =1; i<101; i++)
+    {
+        ev1.WaitOne();
+        var x = queue1.Take();
+        x.Handle();
+        queue2.Add(new Message());
+        if(i==100) count.Add(i);
+        ev.Set();
+    }
+    queue1.Take();
+});
+Thread thr1 = new (() =>
+{
+    for(int i =1; i<101; i++)
+    {
+        ev.WaitOne();
+        var x = queue2.Take();
+        x.Handle();
+        queue1.Add(new Message());
+        if(i==100) count.Add(i);
+        ev1.Set();
+    }
+});
+
+thr.Start();
+thr1.Start();
+thr.Join();
+thr1.Join();
+int i=1;
+foreach(var x in count)
+{
+    Console.WriteLine($"Обработанных сообщений в потоке {i}  = " + x);
+    i++;
+}
+
 #!csharp
 
 Assert.Equal(0, queue1.Count);
