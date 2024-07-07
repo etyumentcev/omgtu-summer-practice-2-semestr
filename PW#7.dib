@@ -38,3 +38,167 @@ ServerThread может менять свое поведение для обра
 Отсутствие Команд в очереди потока не должно требовать значительных затрат процессорного времени. Значительными считаются затраты, которые зависят от времени простоя потока.
 
 Написать проверку, которая гарантирует правильное выполнение команд HardStop и SoftStop.
+
+#!markdown
+
+Реализация класса ServerThread:
+
+#!csharp
+
+using System;
+using System.Collections.Concurrent;
+using System.Threading;
+public class ServerThread
+{
+    Thread thread1;
+    bool isRun = true;
+    bool emptyqueue = false;
+    ConcurrentQueue<ICommand> CommandQueue = new ConcurrentQueue<ICommand>();
+    public ServerThread()
+    {
+        thread1 = new Thread(Run);
+        thread1.Start();
+    }
+    public void Run()
+    {
+        while (isRun)
+        {
+            if (CommandQueue.TryDequeue(out ICommand command))
+            {
+                command.Execute();
+            }
+            else if (emptyqueue && CommandQueue.IsEmpty)
+            {
+                isRun = false;
+            }
+        }
+    }
+    public void Stop()
+    {
+        isRun = false;
+    }
+    public void Emptyqueue()
+    {
+        emptyqueue = true;
+    }
+    public void EnqueueCommand(ICommand command)
+    {
+        CommandQueue.Enqueue(command);
+    }
+     public Thread GetThread()
+    {
+        return thread1;
+    }
+}
+
+#!markdown
+
+Реализация класса HardStop:
+
+#!csharp
+
+public class Hardstop : ICommand
+{
+    ServerThread thread1;
+    public Hardstop(ServerThread Thread1)
+    {
+        thread1 = Thread1;
+    }
+    public void Execute()
+    {
+        if (thread1.GetThread() == Thread.CurrentThread)
+        {
+            thread1.Stop();
+        }
+        else
+        {
+            throw new Exception("Hardstop может выполняться только в текущем потоке");
+        }
+    }
+}
+
+#!markdown
+
+Реализация класса SoftStop:
+
+#!csharp
+
+public class Softstop : ICommand
+{
+    ServerThread thread1;
+    public Softstop(ServerThread Thread1)
+    {
+        thread1 = Thread1;
+    }
+    public void Execute()
+    {
+        if (thread1.GetThread() == Thread.CurrentThread)
+        {
+            thread1.Emptyqueue();
+        }
+        else
+        {
+            throw new Exception("Softstop может выполняться только в текущем потоке");
+        }
+    }
+}
+
+#!markdown
+
+Тесты команд
+
+#!csharp
+
+public class Newcommand1 : ICommand
+{
+    public void Execute()
+    {
+        Console.WriteLine("Команда №1 выполнена удачно!");
+    }
+}
+public class Newcommand2 : ICommand
+{
+    public void Execute()
+    {
+        Console.WriteLine("Команда №2 выполнена удачно!");
+    }
+}
+public class Newcommand3 : ICommand
+{
+    public void Execute()
+    {
+        Console.WriteLine("Команда №3 выполнена удачно!");
+    }
+}
+
+#!markdown
+
+Тесты для HardStop
+
+#!csharp
+
+var thread1 = new ServerThread();
+thread1.EnqueueCommand(new Newcommand1());
+thread1.EnqueueCommand(new Newcommand2());
+thread1.EnqueueCommand(new Hardstop(thread1));
+thread1.EnqueueCommand(new Newcommand3());
+thread1.GetThread().Join();
+Assert.False(thread1.GetThread().IsAlive);
+Console.WriteLine("Hardstop выполнился правильно.");
+
+#!markdown
+
+Тесты для SoftStop
+
+#!csharp
+
+#r "nuget: xunit, 2.8.1"
+using Xunit;
+var thread1 = new ServerThread();
+thread1.EnqueueCommand(new Newcommand1());
+thread1.EnqueueCommand(new Newcommand2());
+thread1.EnqueueCommand(new Softstop(thread1));
+thread1.EnqueueCommand(new Newcommand3());
+thread1.GetThread().Join();
+Assert.False(thread1.GetThread().IsAlive);
+Console.WriteLine("Softstop выполнился правильно.");
